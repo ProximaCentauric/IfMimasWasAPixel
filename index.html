@@ -35,7 +35,7 @@
   }
   #stage.dragging { cursor: grabbing; }
 
-  /* Regions (belts, heliosheath, Oort cloud) */
+  /* Regions (belts, heliosheath, Oort cloud, Planet Nine zone) */
   .region { position: absolute; top: 0; bottom: 0; display: none; pointer-events: none; }
   .region span {
     position: absolute; left: 12px; bottom: 150px; white-space: nowrap;
@@ -48,7 +48,8 @@
     position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%;
     border: 1px solid var(--rule); transform: translate(-50%, -50%);
   }
-  .halo.sub { border-style: dashed; border-color: rgba(255, 179, 71, .55); }   /* dashed = smaller than 1 pixel */
+  .halo.sub { border-style: dashed; border-color: rgba(255, 179, 71, .55); }      /* dashed = smaller than 1 pixel */
+  .halo.ghost { width: 34px; height: 34px; border-style: dotted; border-color: rgba(190, 160, 255, .75); }  /* dotted = never found */
   .tag {
     position: absolute; transform: translate(-50%, -100%);
     text-align: center; white-space: nowrap; line-height: 1.3; pointer-events: none;
@@ -116,7 +117,7 @@
     <option value="all">Slider: all the way to Alpha Centauri</option>
   </select>
   <div id="controls">
-    <span id="legend">Dashed ring: smaller than one pixel</span>
+    <span id="legend">Dashed ring: under one pixel. Dotted purple ring: never found.</span>
     <label for="speed" id="hint">Scroll speed</label>
     <select id="speed">
       <option value="1">x1</option>
@@ -158,6 +159,19 @@ const PLANETS = [
   { name: "Neptune", d: 49244,   a: 4515e6,  fill: "#4b6fe0" }
 ];
 
+// Saturn's rings: r0 and r1 are the inner and outer edges, in km from Saturn's centre
+const RING_TILT_DEG = 26.7;             // Saturn's axial tilt; drawn this way so the bands show (0 hides the rings)
+const SATURN_RINGS = [
+  { name: "D ring", r0: 66900,  r1: 74510,  fill: "rgba(200,180,150,.14)" },
+  { name: "C ring", r0: 74658,  r1: 92000,  fill: "rgba(140,120,100,.38)" },
+  { name: "B ring", r0: 92000,  r1: 117580, fill: "rgba(232,208,165,.88)" },
+  // Cassini Division: 117,580 to 122,170 km is left empty on purpose
+  { name: "A ring", r0: 122170, r1: 136775, fill: "rgba(214,190,150,.72)" },
+  { name: "F ring", r0: 140080, r1: 140300, fill: "rgba(235,220,195,.9)" },
+  { name: "G ring", r0: 166000, r1: 175000, fill: "rgba(200,190,170,.12)" },
+  { name: "E ring", r0: 180000, r1: 480000, fill: "rgba(190,200,240,.05)" }
+];
+
 // Asteroids, dwarf planets and other small bodies, sorted by distance
 // au = semi-major axis (AU), est = size is an estimate
 const TNO = "Trans-Neptunian object";
@@ -185,19 +199,53 @@ const SMALL = [
     note: "506 AU on average, ranging from 76 to 937 AU" }
 ];
 
+// Objects that were proposed but never found (or were ruled out), shown where people thought they'd be.
+// They have no body, only a dotted ring, because nobody knows their size.
+const HYPO = [
+  { name: "Vulcan",      au: 0.14,   kind: "Hypothetical planet, ruled out",
+    note: "Proposed in 1859, about 0.14 AU from the Sun",
+    extra: "Mercury's odd orbit turned out to be general relativity" },
+  { name: "Planet X",    au: 43,     kind: "Hypothetical planet, ruled out",
+    note: "Lowell predicted it in 1915, at about 43 AU",
+    extra: "Pluto turned up in 1930, but it is far too small" },
+  { name: "Planet Nine", au: 600,    kind: "Hypothetical planet, still searched for",
+    note: "Proposed in 2016, estimates range from 400 to 800 AU",
+    extra: "Would be about 5 to 10 Earth masses" },
+  { name: "Tyche",       au: 15000,  kind: "Hypothetical gas giant, not found",
+    note: "Proposed in 1999, about 15,000 AU out",
+    extra: "NASA's WISE survey found no sign of it" },
+  { name: "Nemesis",     au: 95000,  kind: "Hypothetical companion star, not found",
+    note: "Proposed in 1984, about 1.5 light-years out",
+    extra: "Meant to explain a 26-million-year extinction cycle" }
+];
+
 // The far reaches: spacecraft and the nearest stars
-// Voyager positions are estimates from a reference date, so the page updates itself when it loads.
-// To recalibrate, change the AU figure and the date from NASA's Voyager mission status page.
+// Spacecraft positions are estimates from a reference date and speed, so the page updates itself when it loads.
+// To recalibrate, change the AU figure and the date from NASA's mission status pages.
 const yearsSince = iso => (Date.now() - Date.parse(iso)) / 31557600000;
-const v1au = 172.1 + 3.57 * yearsSince("2026-10-14");    // Voyager 1, ~3.57 AU per year
-const v2au = 145.5 + 3.25 * yearsSince("2026-10-14");    // Voyager 2, ~3.25 AU per year (rougher estimate)
+const v1au  = 172.1 + 3.57 * yearsSince("2026-10-14");   // Voyager 1, ~3.57 AU per year
+const v2au  = 145.5 + 3.25 * yearsSince("2026-10-14");   // Voyager 2, ~3.25 AU per year (rougher estimate)
+const p10au = 102.9 + 2.55 * yearsSince("2011-05-06");   // Pioneer 10, last tracked in 2003, so this is extrapolated
+const p11au = 82.9  + 2.45 * yearsSince("2011-05-06");   // Pioneer 11, last tracked in 1995, so this is extrapolated
+const nhau  = 64.45 + 2.89 * yearsSince("2026-04-15");   // New Horizons, ~2.89 AU per year
 const alphaCenA = 4.344 * LY_AU * AU_KM;                  // Alpha Centauri A, in km from the Sun
 
 const FAR = [
+  { name: "New Horizons", a: nhau * AU_KM, d: 0.0021, kind: "Spacecraft", fill: "#9fd8ff",
+    note: `About ${Math.round(nhau)} AU out, gaining 2.9 AU a year`,
+    extra: "Flew past Pluto in 2015, still operating" },
+  { name: "Pioneer 11", a: p11au * AU_KM, d: 0.00274, kind: "Spacecraft", fill: "#c9b08a", lane: -1,
+    note: `About ${Math.round(p11au)} AU out, gaining 2.4 AU a year`,
+    extra: "Last signal received in 1995" },
+  { name: "Pioneer 10", a: p10au * AU_KM, d: 0.00274, kind: "Spacecraft", fill: "#c9b08a",
+    note: `About ${Math.round(p10au)} AU out, gaining 2.5 AU a year`,
+    extra: "Last signal received in 2003" },
   { name: "Voyager 2", a: v2au * AU_KM, d: 0.00366, kind: "Spacecraft", fill: "#ffb347", lane: -1,
-    note: `About ${Math.round(v2au)} AU out, gaining 3.3 AU a year` },
+    note: `About ${Math.round(v2au)} AU out, gaining 3.3 AU a year`,
+    extra: "Left the heliosphere in 2018" },
   { name: "Voyager 1", a: v1au * AU_KM, d: 0.00366, kind: "Spacecraft", fill: "#ffb347",
-    note: `About ${Math.round(v1au)} AU out, gaining 3.6 AU a year` },
+    note: `About ${Math.round(v1au)} AU out, gaining 3.6 AU a year`,
+    extra: "Left the heliosphere in 2012" },
   { name: "Proxima Centauri", a: 4.2465 * LY_AU * AU_KM, d: 214750, kind: "Red dwarf, M5.5Ve", glow: true,
     fill: "radial-gradient(circle at 38% 38%, #ff9a6a, #e8431f 60%, #a82a10)", ink: "#2a0d00", inkDim: "#4a1a08",
     note: "4.25 light-years from the Sun" },
@@ -258,15 +306,18 @@ const REGION_DEFS = [
   { name: "Kuiper belt",         from: 30,   to: 50,     tint: "rgba(120,160,230,.07)" },
   { name: "Heliosheath: termination shock (about 94 AU) to heliopause (about 120 AU)",
                                 from: 94,   to: 120,    tint: "rgba(255,179,71,.07)" },
+  { name: "Planet Nine search zone (published estimates range from roughly 400 to 800 AU)",
+                                from: 400,  to: 800,    tint: "rgba(190,160,255,.07)", menu: false },
   { name: "Oort cloud (estimates vary: roughly 2,000 to 100,000 AU)",
                                 from: 2000, to: 100000, tint: "rgba(170,150,230,.06)" }
 ];
 
 const SMALL_A = SMALL.map(s => ({ ...s, a: s.au * AU_KM, small: true }));
-const FAR_A = FAR.map(f => ({ ...f, far: true }));
+const HYPO_A  = HYPO.map(h => ({ ...h, a: h.au * AU_KM, d: 0, ghost: true, hypo: true }));
+const FAR_A   = FAR.map(f => ({ ...f, far: true }));
 const PARENTS = PLANETS.concat(SMALL_A);
 // Moons sit on the same side of their parent, at their real mean orbital distance
-const BODIES = PLANETS.concat(SMALL_A, FAR_A, MOONS.map(m => ({
+const BODIES = PLANETS.concat(SMALL_A, HYPO_A, FAR_A, MOONS.map(m => ({
   ...m,
   moon: true,
   a: PARENTS.find(p => p.name === m.parent).a + m.orbit,
@@ -311,6 +362,30 @@ function add(el, x, halfWidth) {
   items.push({ el, x, hw: halfWidth, vis: false });
 }
 
+/* Saturn's rings: seen at an angle, so each band is an ellipse. The far half is drawn behind the planet, the near half in front. */
+const ringSin = Math.sin(RING_TILT_DEG * Math.PI / 180);
+const ringsOn = ringSin > 0.01;
+const RING_R = px(480000);              // outer edge of the faint E ring, in px
+const RING_HW = RING_R + 100;
+function ringLayer(half) {
+  const H = RING_R * ringSin;
+  const ell = (rx, ry) => `M ${-rx} 0 A ${rx} ${ry} 0 1 0 ${rx} 0 A ${rx} ${ry} 0 1 0 ${-rx} 0 Z`;
+  const bands = SATURN_RINGS.map(r => {
+    const o = px(r.r1), i = px(r.r0);
+    return `<path fill="${r.fill}" fill-rule="evenodd" d="${ell(o, o * ringSin)} ${ell(i, i * ringSin)}"/>`;
+  }).join("");
+  const y = half === "back" ? -H : 0;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `${-RING_R} ${-H} ${2 * RING_R} ${2 * H}`);
+  svg.setAttribute("width", 2 * RING_R);
+  svg.setAttribute("height", 2 * H);
+  svg.style.cssText = "position:absolute; top:50%; transform:translate(-50%,-50%); overflow:visible; pointer-events:none;";
+  svg.innerHTML =
+    `<defs><clipPath id="ring-${half}"><rect x="${-RING_R}" y="${y}" width="${2 * RING_R}" height="${H}"/></clipPath></defs>` +
+    `<g clip-path="url(#ring-${half})">${bands}</g>`;
+  return svg;
+}
+
 /* Jump menus */
 function makeMenu(label) {
   const s = document.createElement("select");
@@ -321,6 +396,7 @@ function makeMenu(label) {
 }
 const moonMenu = makeMenu("Jump to a moon");
 const smallMenu = makeMenu("Jump to an asteroid or dwarf planet");
+const hypoMenu = makeMenu("Jump to a hypothetical object");
 const farMenu = makeMenu("Jump to the far reaches");
 const groups = {};
 const farOptions = [];
@@ -329,23 +405,29 @@ const farOptions = [];
 BODIES.forEach(b => {
   const x = xOf(b), size = px(b.d);
 
-  if (size < 20) {                       // tiny bodies get a ring so you can spot them
+  if (size < 20) {                       // tiny bodies, and objects never found, get a ring so you can spot them
     const h = document.createElement("div");
-    h.className = "halo" + (size < 1 ? " sub" : "");   // dashed ring = under one pixel
+    h.className = "halo" + (b.ghost ? " ghost" : size < 1 ? " sub" : "");
     add(h, x, 60);
   }
 
-  const el = document.createElement("div");
-  el.className = "body";
-  el.style.cssText = `width:${size}px; height:${size}px; background:${b.fill};`;
-  if (b.glow) el.style.boxShadow = "0 0 120px 30px rgba(255,160,40,.35)";
-  add(el, x, size / 2 + 150);
+  if (b.name === "Saturn" && ringsOn) add(ringLayer("back"), x, RING_HW);
+
+  if (!b.ghost) {
+    const el = document.createElement("div");
+    el.className = "body";
+    el.style.cssText = `width:${size}px; height:${size}px; background:${b.fill};`;
+    if (b.glow) el.style.boxShadow = "0 0 120px 30px rgba(255,160,40,.35)";
+    add(el, x, size / 2 + 150);
+  }
+
+  if (b.name === "Saturn" && ringsOn) add(ringLayer("front"), x, RING_HW);
 
   /* Label: big bodies (the Sun, nearby stars) get it centred inside */
   const inside = size > 500;
   const lane = b.lane || 1;
   const below = lane < 0;
-  const reach = size < 20 ? 15 : size / 2;                 // clear the body (or its ring)
+  const reach = b.ghost ? 20 : size < 20 ? 15 : size / 2;  // clear the body (or its ring)
   const offset = reach + 14 + (Math.abs(lane) - 1) * 95;   // extra height for crowded lanes
 
   const tag = document.createElement("div");
@@ -358,16 +440,32 @@ BODIES.forEach(b => {
   const sizeText = b.d < 1
     ? `${(b.d * 1000).toFixed(b.d * 1000 < 10 ? 1 : 0)} m`
     : (b.d < 10 ? `${b.d}` : fmt(b.d)) + " km";
-  const line2 = b.a ? `${b.kind ? b.kind + ", " : ""}${b.est ? "about " : ""}${sizeText} wide` : "";
-  const line3 = size < 0.001 ? `about 1/${fmt(1 / size)} of a pixel`
+  let line2 = "";
+  if (b.ghost) line2 = b.kind;
+  else if (b.a) line2 = `${b.kind ? b.kind + ", " : ""}${b.est ? "about " : ""}${sizeText} wide`;
+  const line3 = b.ghost ? ""
+              : size < 0.001 ? `about 1/${fmt(1 / size)} of a pixel`
               : size < 1 ? `${size.toPrecision(2)} of a pixel`
               : b.name === "Mimas" ? "exactly 1 pixel" : "";
   const text = `<b>${b.name}</b><span>${line1}</span>` +
                (line2 ? `<span><br>${line2}</span>` : "") +
-               (line3 ? `<span><br>${line3}</span>` : "");
+               (line3 ? `<span><br>${line3}</span>` : "") +
+               (b.extra ? `<span><br>${b.extra}</span>` : "");
   const stem = inside ? "" : `<i class="stem"></i>`;
   tag.innerHTML = below ? stem + text : text + stem;
   add(tag, x, 220);
+
+  /* Label for Saturn's rings, below the planet */
+  if (b.name === "Saturn" && ringsOn) {
+    const rt = document.createElement("div");
+    rt.className = "tag below";
+    rt.style.top = `calc(50% + ${size / 2 + 14}px)`;
+    rt.innerHTML = `<i class="stem"></i><b>Saturn's rings</b>` +
+      `<span>Main rings reach 136,775 km from the centre</span>` +
+      `<span><br>Faint E ring reaches about 480,000 km</span>` +
+      `<span><br>Typically about 10 m thick: 1/40,000 of a pixel</span>`;
+    add(rt, x, 260);
+  }
 
   /* Jump controls: planets get buttons, everything else gets a dropdown */
   if (b.moon) {
@@ -383,6 +481,10 @@ BODIES.forEach(b => {
     const opt = document.createElement("option");
     opt.value = x; opt.textContent = b.name;
     smallMenu.appendChild(opt);
+  } else if (b.hypo) {
+    const opt = document.createElement("option");
+    opt.value = x; opt.textContent = b.name;
+    hypoMenu.appendChild(opt);
   } else if (b.far) {
     farOptions.push({ label: b.name, x });
   } else {
@@ -395,7 +497,7 @@ BODIES.forEach(b => {
 
 /* The far-reaches menu also lists the regions' starting edges, sorted by distance */
 regions.forEach(r => {
-  if (r.from >= 90) farOptions.push({ label: r.name.split(":")[0].split(" (")[0], x: r.x0 });
+  if (r.from >= 90 && r.menu !== false) farOptions.push({ label: r.name.split(":")[0].split(" (")[0], x: r.x0 });
 });
 farOptions.sort((p, q) => p.x - q.x).forEach(o => {
   const opt = document.createElement("option");
@@ -405,6 +507,7 @@ farOptions.sort((p, q) => p.x - q.x).forEach(o => {
 
 nav.appendChild(smallMenu);
 nav.appendChild(moonMenu);
+nav.appendChild(hypoMenu);
 nav.appendChild(farMenu);
 
 /* Ruler: every AU to 30, every 10 AU to 100, then wider steps, plus light-travel marks */
