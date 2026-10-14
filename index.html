@@ -6,7 +6,7 @@
 <title>If Mimas Was a Pixel</title>
 <meta name="description" content="A solar system scale model where Mimas, Saturn's moon, is a single pixel.">
 <meta property="og:title" content="If Mimas Was a Pixel">
-<meta property="og:description" content="Scroll the solar system at true scale, with Mimas as one pixel. Ride a beam of light from the Sun to Sedna.">
+<meta property="og:description" content="Scroll the solar system, and the gulf to the next star, at true scale, with Mimas as one pixel.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>">
 <style>
   :root {
@@ -35,6 +35,13 @@
   }
   #stage.dragging { cursor: grabbing; }
 
+  /* Regions (belts, heliosheath, Oort cloud) */
+  .region { position: absolute; top: 0; bottom: 0; display: none; pointer-events: none; }
+  .region span {
+    position: absolute; left: 12px; bottom: 150px; white-space: nowrap;
+    font-size: .8rem; color: var(--dim);
+  }
+
   /* Bodies */
   .body { position: absolute; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); }
   .halo {
@@ -49,17 +56,19 @@
   .tag.below { transform: translate(-50%, 0); }
   .tag b { display: block; font-size: 1.05rem; font-weight: 600; }
   .tag span { font-size: .8rem; color: var(--dim); }
-  .tag.on-sun { transform: translate(-50%, -50%); color: #3b1c00; }
-  .tag.on-sun span { color: #5a2d00; }
+  .tag.on-sun { transform: translate(-50%, -50%); color: var(--inside-ink, #3b1c00); }
+  .tag.on-sun span { color: var(--inside-ink-dim, #5a2d00); }
   .stem { display: block; width: 1px; height: 18px; background: var(--rule); margin: 4px auto 0; }
   .tag.below .stem { margin: 0 auto 4px; }
 
-  /* AU ruler */
+  /* Ruler */
   .tick { position: absolute; bottom: 96px; width: 1px; height: 22px; background: var(--rule); }
   .tick i {
     position: absolute; bottom: 26px; left: 0; transform: translateX(-50%);
     font-style: normal; font-size: .75rem; color: var(--dim); white-space: nowrap;
   }
+  .tick.light { background: rgba(255, 179, 71, .6); }
+  .tick.light i { color: #ffb347; }
 
   /* Controls */
   #top, #hud {
@@ -99,7 +108,13 @@
 
 <div id="hud">
   <div id="readout" aria-live="off"></div>
-  <input type="range" id="scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the solar system">
+  <input type="range" id="scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the solar system (linear)">
+  <select id="range" aria-label="Distance the slider covers">
+    <option value="3">Slider: out to 3 AU</option>
+    <option value="30">Slider: out to 30 AU (Neptune)</option>
+    <option value="600" selected>Slider: out to 600 AU (Sedna)</option>
+    <option value="all">Slider: all the way to Alpha Centauri</option>
+  </select>
   <div id="controls">
     <span id="legend">Dashed ring: smaller than one pixel</span>
     <label for="speed" id="hint">Scroll speed</label>
@@ -110,6 +125,9 @@
       <option value="1000">x1,000</option>
       <option value="10000">x10,000</option>
       <option value="100000">x100,000</option>
+      <option value="1000000">x1,000,000</option>
+      <option value="10000000">x10,000,000</option>
+      <option value="100000000">x100,000,000</option>
     </select>
     <button id="photon" aria-pressed="false">Ride a beam of light</button>
   </div>
@@ -122,12 +140,14 @@ const KM_PER_PX = 396.4;
 
 const AU_KM = 149597870.7;
 const C_KM_S = 299792.458;              // speed of light
+const LY_AU = 63241.077;                // light-year in AU
 const LIGHT_PX_PER_S = C_KM_S / KM_PER_PX;
 const fmt = n => Math.round(n).toLocaleString("en-US");
 
 // Planets: d = diameter (km), a = mean distance from the Sun (km)
 const PLANETS = [
-  { name: "Sun",     d: 1392684, a: 0,       fill: "radial-gradient(circle at 38% 38%, #fff4b8, #ffb300 55%, #ff7a00)", glow: true },
+  { name: "Sun",     d: 1392684, a: 0,       fill: "radial-gradient(circle at 38% 38%, #fff4b8, #ffb300 55%, #ff7a00)", glow: true,
+    note: "G2V star, 1,392,684 km across" },
   { name: "Mercury", d: 4879,    a: 57.9e6,  fill: "#9d9890" },
   { name: "Venus",   d: 12104,   a: 108.2e6, fill: "#e3c27a" },
   { name: "Earth",   d: 12742,   a: 149.6e6, fill: "radial-gradient(circle at 35% 35%, #7fb8ff, #1f5fb4)" },
@@ -163,6 +183,30 @@ const SMALL = [
   { name: "Gǃkúnǁʼhòmdímà", au: 74, d: 640, kind: TNO, est: true, fill: "#8a5a50" },
   { name: "Sedna",    au: 506,   d: 995,   kind: TNO, est: true, fill: "#b5442e",
     note: "506 AU on average, ranging from 76 to 937 AU" }
+];
+
+// The far reaches: spacecraft and the nearest stars
+// Voyager positions are estimates from a reference date, so the page updates itself when it loads.
+// To recalibrate, change the AU figure and the date from NASA's Voyager mission status page.
+const yearsSince = iso => (Date.now() - Date.parse(iso)) / 31557600000;
+const v1au = 172.1 + 3.57 * yearsSince("2026-10-14");    // Voyager 1, ~3.57 AU per year
+const v2au = 145.5 + 3.25 * yearsSince("2026-10-14");    // Voyager 2, ~3.25 AU per year (rougher estimate)
+const alphaCenA = 4.344 * LY_AU * AU_KM;                  // Alpha Centauri A, in km from the Sun
+
+const FAR = [
+  { name: "Voyager 2", a: v2au * AU_KM, d: 0.00366, kind: "Spacecraft", fill: "#ffb347", lane: -1,
+    note: `About ${Math.round(v2au)} AU out, gaining 3.3 AU a year` },
+  { name: "Voyager 1", a: v1au * AU_KM, d: 0.00366, kind: "Spacecraft", fill: "#ffb347",
+    note: `About ${Math.round(v1au)} AU out, gaining 3.6 AU a year` },
+  { name: "Proxima Centauri", a: 4.2465 * LY_AU * AU_KM, d: 214750, kind: "Red dwarf, M5.5Ve", glow: true,
+    fill: "radial-gradient(circle at 38% 38%, #ff9a6a, #e8431f 60%, #a82a10)", ink: "#2a0d00", inkDim: "#4a1a08",
+    note: "4.25 light-years from the Sun" },
+  { name: "Alpha Centauri A", a: alphaCenA, d: 1703800, kind: "G2V star", glow: true,
+    fill: "radial-gradient(circle at 38% 38%, #fffbe0, #ffe27a 55%, #ffc13a)",
+    note: "4.34 light-years from the Sun" },
+  { name: "Alpha Centauri B", a: alphaCenA + 23.4 * AU_KM, d: 1202200, kind: "K1V star", glow: true,
+    fill: "radial-gradient(circle at 38% 38%, #ffe0b0, #ffa94a 60%, #e6792a)",
+    note: "About 23 AU from Alpha Centauri A" }
 ];
 
 // Moons: orbit = mean distance from the parent (km), grouped by parent and sorted by distance
@@ -208,10 +252,21 @@ const MOONS = [
   { name: "Charon",    parent: "Pluto",   d: 1212,   orbit: 19591,    fill: "#8f8a88", lane: -1 }
 ];
 
+// Regions drawn as shaded bands (distances in AU; estimates vary for the outer ones)
+const REGION_DEFS = [
+  { name: "Main asteroid belt",  from: 2.2,  to: 3.2,    tint: "rgba(190,160,120,.08)" },
+  { name: "Kuiper belt",         from: 30,   to: 50,     tint: "rgba(120,160,230,.07)" },
+  { name: "Heliosheath: termination shock (about 94 AU) to heliopause (about 120 AU)",
+                                from: 94,   to: 120,    tint: "rgba(255,179,71,.07)" },
+  { name: "Oort cloud (estimates vary: roughly 2,000 to 100,000 AU)",
+                                from: 2000, to: 100000, tint: "rgba(170,150,230,.06)" }
+];
+
 const SMALL_A = SMALL.map(s => ({ ...s, a: s.au * AU_KM, small: true }));
+const FAR_A = FAR.map(f => ({ ...f, far: true }));
 const PARENTS = PLANETS.concat(SMALL_A);
 // Moons sit on the same side of their parent, at their real mean orbital distance
-const BODIES = PLANETS.concat(SMALL_A, MOONS.map(m => ({
+const BODIES = PLANETS.concat(SMALL_A, FAR_A, MOONS.map(m => ({
   ...m,
   moon: true,
   a: PARENTS.find(p => p.name === m.parent).a + m.orbit,
@@ -221,6 +276,7 @@ const BODIES = PLANETS.concat(SMALL_A, MOONS.map(m => ({
 const px = km => km / KM_PER_PX;
 const SUN_R = px(PLANETS[0].d / 2);
 const xOf = b => SUN_R + px(b.a);       // world x of each body's centre
+const xAU = au => SUN_R + px(au * AU_KM);
 const WORLD_W = Math.max(...BODIES.map(xOf)) + 1200;
 
 const stage = document.getElementById("stage");
@@ -237,7 +293,17 @@ const maxCam = () => Math.max(0, WORLD_W - stage.clientWidth);
 const setCam = v => { camLeft = Math.min(Math.max(0, v), maxCam()); dirty = true; };
 const goTo = x => setCam(x - stage.clientWidth / 2);
 
-/* Everything drawn on the stage registers here; only items near the screen are shown */
+/* Regions first, so they sit behind everything else */
+const regions = REGION_DEFS.map(r => {
+  const el = document.createElement("div");
+  el.className = "region";
+  el.style.background = r.tint;
+  el.innerHTML = `<span>${r.name}</span>`;
+  stage.appendChild(el);
+  return { ...r, x0: xAU(r.from), x1: xAU(r.to), el };
+});
+
+/* Everything else registers here; only items near the screen are shown */
 const items = [];
 function add(el, x, halfWidth) {
   el.style.display = "none";
@@ -255,7 +321,9 @@ function makeMenu(label) {
 }
 const moonMenu = makeMenu("Jump to a moon");
 const smallMenu = makeMenu("Jump to an asteroid or dwarf planet");
+const farMenu = makeMenu("Jump to the far reaches");
 const groups = {};
+const farOptions = [];
 
 /* Build bodies, labels, jump controls */
 BODIES.forEach(b => {
@@ -273,31 +341,35 @@ BODIES.forEach(b => {
   if (b.glow) el.style.boxShadow = "0 0 120px 30px rgba(255,160,40,.35)";
   add(el, x, size / 2 + 150);
 
-  /* Label */
-  const isSun = b.name === "Sun";
+  /* Label: big bodies (the Sun, nearby stars) get it centred inside */
+  const inside = size > 500;
   const lane = b.lane || 1;
   const below = lane < 0;
   const reach = size < 20 ? 15 : size / 2;                 // clear the body (or its ring)
   const offset = reach + 14 + (Math.abs(lane) - 1) * 95;   // extra height for crowded lanes
 
   const tag = document.createElement("div");
-  tag.className = "tag" + (isSun ? " on-sun" : "") + (below ? " below" : "");
-  tag.style.top = isSun ? "50%" : below ? `calc(50% + ${offset}px)` : `calc(50% - ${offset}px)`;
+  tag.className = "tag" + (inside ? " on-sun" : "") + (below ? " below" : "");
+  tag.style.top = inside ? "50%" : below ? `calc(50% + ${offset}px)` : `calc(50% - ${offset}px)`;
+  if (b.ink) { tag.style.setProperty("--inside-ink", b.ink); tag.style.setProperty("--inside-ink-dim", b.inkDim || b.ink); }
 
   const au = b.a / AU_KM;
-  const line1 = b.note || (b.a ? `${au.toFixed(au >= 100 ? 0 : 2)} AU from the Sun` : "Diameter 1,392,684 km");
-  const sizeKm = b.d < 10 ? b.d.toString() : fmt(b.d);
-  const line2 = b.a ? `${b.kind ? b.kind + ", " : ""}${b.est ? "about " : ""}${sizeKm} km wide` : "";
-  const line3 = size < 1 ? `${size.toPrecision(2)} of a pixel`
+  const line1 = b.note || `${au.toFixed(au >= 100 ? 0 : 2)} AU from the Sun`;
+  const sizeText = b.d < 1
+    ? `${(b.d * 1000).toFixed(b.d * 1000 < 10 ? 1 : 0)} m`
+    : (b.d < 10 ? `${b.d}` : fmt(b.d)) + " km";
+  const line2 = b.a ? `${b.kind ? b.kind + ", " : ""}${b.est ? "about " : ""}${sizeText} wide` : "";
+  const line3 = size < 0.001 ? `about 1/${fmt(1 / size)} of a pixel`
+              : size < 1 ? `${size.toPrecision(2)} of a pixel`
               : b.name === "Mimas" ? "exactly 1 pixel" : "";
   const text = `<b>${b.name}</b><span>${line1}</span>` +
                (line2 ? `<span><br>${line2}</span>` : "") +
                (line3 ? `<span><br>${line3}</span>` : "");
-  const stem = isSun ? "" : `<i class="stem"></i>`;
+  const stem = inside ? "" : `<i class="stem"></i>`;
   tag.innerHTML = below ? stem + text : text + stem;
   add(tag, x, 220);
 
-  /* Jump controls: planets get buttons, small bodies and moons get dropdowns */
+  /* Jump controls: planets get buttons, everything else gets a dropdown */
   if (b.moon) {
     if (!groups[b.parent]) {
       groups[b.parent] = document.createElement("optgroup");
@@ -311,6 +383,8 @@ BODIES.forEach(b => {
     const opt = document.createElement("option");
     opt.value = x; opt.textContent = b.name;
     smallMenu.appendChild(opt);
+  } else if (b.far) {
+    farOptions.push({ label: b.name, x });
   } else {
     const btn = document.createElement("button");
     btn.textContent = b.name;
@@ -318,29 +392,63 @@ BODIES.forEach(b => {
     nav.appendChild(btn);
   }
 });
+
+/* The far-reaches menu also lists the regions' starting edges, sorted by distance */
+regions.forEach(r => {
+  if (r.from >= 90) farOptions.push({ label: r.name.split(":")[0].split(" (")[0], x: r.x0 });
+});
+farOptions.sort((p, q) => p.x - q.x).forEach(o => {
+  const opt = document.createElement("option");
+  opt.value = o.x; opt.textContent = o.label;
+  farMenu.appendChild(opt);
+});
+
 nav.appendChild(smallMenu);
 nav.appendChild(moonMenu);
+nav.appendChild(farMenu);
 
-/* AU ruler: every AU to 30, every 10 AU to 100, then every 100 AU */
+/* Ruler: every AU to 30, every 10 AU to 100, then wider steps, plus light-travel marks */
 const TICKS = [];
-for (let i = 1; i <= 30; i++) TICKS.push(i);
-for (let i = 40; i <= 100; i += 10) TICKS.push(i);
-for (let i = 200; i <= 500; i += 100) TICKS.push(i);
-TICKS.forEach(au => {
-  const t = document.createElement("div");
-  t.className = "tick";
-  t.innerHTML = `<i>${au} AU</i>`;
-  add(t, SUN_R + px(au * AU_KM), 80);
+for (let i = 1; i <= 30; i++) TICKS.push({ au: i, label: `${i} AU` });
+for (let i = 40; i <= 100; i += 10) TICKS.push({ au: i, label: `${i} AU` });
+[200, 300, 400, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000]
+  .forEach(au => TICKS.push({ au, label: `${fmt(au)} AU` }));
+TICKS.push({ au: C_KM_S * 86400 / AU_KM, label: "1 light-day", light: true });
+for (let y = 1; y <= 4; y++) TICKS.push({ au: y * LY_AU, label: `${y} light-year${y > 1 ? "s" : ""}`, light: true });
+TICKS.forEach(t => {
+  const el = document.createElement("div");
+  el.className = "tick" + (t.light ? " light" : "");
+  el.innerHTML = `<i>${t.label}</i>`;
+  add(el, xAU(t.au), 120);
 });
 
 /* ---------- Drawing ---------- */
 const TILES = [413, 577, 701, 853];       // star-field tile widths (match background-size)
 
-function hms(s) {
+function span(s) {
+  const y = s / 31557600;
+  if (y >= 1) return `${y.toFixed(y >= 10 ? 1 : 2)} years`;
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
   return d ? `${d} d ${h} h ${m} min` : h ? `${h} h ${m} min ${sec} s` : m ? `${m} min ${sec} s` : `${sec} s`;
 }
+function distText(km) {
+  const au = km / AU_KM;
+  if (au >= 5000) return `${(au / LY_AU).toFixed(3)} light-years (${fmt(au)} AU)`;
+  const big = km >= 1e12 ? `${(km / 1e12).toFixed(2)} trillion km`
+            : km >= 1e9  ? `${(km / 1e9).toFixed(1)} billion km`
+            : `${(km / 1e6).toFixed(1)} million km`;
+  return `${big} (${au.toFixed(au >= 100 ? 0 : 2)} AU)`;
+}
+
+/* Slider is linear: its full width covers the distance chosen in the dropdown */
+const rangeSel = document.getElementById("range");
+const sliderMax = () => rangeSel.value === "all"
+  ? maxCam()
+  : Math.min(maxCam(), xAU(Number(rangeSel.value)));
+const sliderToCam = t => t * sliderMax();
+const camToSlider = c => Math.min(1, c / sliderMax());
+rangeSel.addEventListener("change", () => { dirty = true; });
 
 function render() {
   const vw = stage.clientWidth;
@@ -350,16 +458,24 @@ function render() {
     if (vis !== it.vis) { it.el.style.display = vis ? "" : "none"; it.vis = vis; }
     if (vis) it.el.style.left = sx + "px";
   }
+  for (const r of regions) {                      // clip each band to the screen (they can be billions of px wide)
+    const s = Math.max(r.x0, camLeft), e = Math.min(r.x1, camLeft + vw);
+    if (e > s) {
+      r.el.style.display = "block";
+      r.el.style.left = (s - camLeft) + "px";
+      r.el.style.width = (e - s) + "px";
+      r.el.style.borderLeft  = s === r.x0 ? "1px dashed rgba(233,230,220,.28)" : "none";
+      r.el.style.borderRight = e === r.x1 ? "1px dashed rgba(233,230,220,.28)" : "none";
+    } else r.el.style.display = "none";
+  }
   stage.style.backgroundPosition = TILES.map(t => `${-(camLeft % t)}px 0`).join(",");
 
   const centre = camLeft + vw / 2;
   const km = Math.max(0, (centre - SUN_R) * KM_PER_PX);
   readout.innerHTML =
-    `<em>Distance from the Sun:</em> ${(km / 1e6).toLocaleString("en-US", { maximumFractionDigits: 1 })} million km ` +
-    `(${(km / AU_KM).toFixed(2)} AU) &nbsp; <em>Light takes</em> ${hms(km / C_KM_S)}`;
+    `<em>Distance from the Sun:</em> ${distText(km)} &nbsp; <em>Light takes</em> ${span(km / C_KM_S)}`;
 
-  // Slider uses a cubic curve so the inner planets aren't squashed into the first pixel
-  scrub.value = String(Math.cbrt(camLeft / Math.max(1, maxCam())) * 1000);
+  scrub.value = String(camToSlider(camLeft) * 1000);
 }
 
 /* ---------- Input: wheel, drag, slider, keyboard, light-speed ---------- */
@@ -382,7 +498,7 @@ const endDrag = () => { drag = null; stage.classList.remove("dragging"); };
 stage.addEventListener("pointerup", endDrag);
 stage.addEventListener("pointercancel", endDrag);
 
-scrub.addEventListener("input", () => setCam(Math.pow(Number(scrub.value) / 1000, 3) * maxCam()));
+scrub.addEventListener("input", () => setCam(sliderToCam(Number(scrub.value) / 1000)));
 addEventListener("resize", () => setCam(camLeft));
 
 const keys = new Set();
