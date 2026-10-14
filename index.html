@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Solar System, Actually to Scale</title>
+<meta name="description" content="Scroll across the solar system at true scale, 1 pixel = 1,000 km.">
+<meta property="og:title" content="The Solar System, Actually to Scale">
+<meta property="og:description" content="Ride a beam of light from the Sun to Neptune.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>">
+<style>
+  :root {
+    --space: #05070d;
+    --ink: #e9e6dc;
+    --dim: #8b90a0;
+    --rule: rgba(233, 230, 220, .22);
+    --panel: rgba(5, 7, 13, .86);
+    --serif: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0; overflow: hidden;
+    background: var(--space); color: var(--ink); font-family: var(--serif);
+  }
+
+  /* The scrolling world */
+  #viewport {
+    position: absolute; inset: 0;
+    overflow-x: scroll; overflow-y: hidden;
+    cursor: grab; scrollbar-width: thin; scrollbar-color: #3a4054 transparent;
+  }
+  #viewport.dragging { cursor: grabbing; }
+  #track {
+    position: relative; height: 100%;
+    background-image:
+      radial-gradient(1px 1px at 37px 61px,   rgba(255,255,255,.9), transparent),
+      radial-gradient(1px 1px at 190px 140px, rgba(255,255,255,.6), transparent),
+      radial-gradient(1.5px 1.5px at 310px 250px, rgba(255,255,255,.8), transparent),
+      radial-gradient(1px 1px at 520px 90px,  rgba(255,255,255,.5), transparent);
+    background-size: 413px 311px, 577px 389px, 701px 463px, 853px 521px;
+  }
+
+  /* Bodies */
+  .body { position: absolute; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); }
+  .halo {
+    position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid var(--rule); transform: translate(-50%, -50%);
+  }
+  .tag {
+    position: absolute; transform: translate(-50%, -100%);
+    text-align: center; white-space: nowrap; line-height: 1.3; pointer-events: none;
+  }
+  .tag b { display: block; font-size: 1.05rem; font-weight: 600; }
+  .tag span { font-size: .8rem; color: var(--dim); }
+  .tag.on-sun { transform: translate(-50%, -50%); color: #3b1c00; }
+  .tag.on-sun span { color: #5a2d00; }
+  .tag::after {
+    content: ""; display: block; width: 1px; height: 18px; margin: 4px auto 0; background: var(--rule);
+  }
+  .tag.on-sun::after { display: none; }
+
+  /* AU ruler */
+  .tick { position: absolute; bottom: 96px; width: 1px; height: 22px; background: var(--rule); }
+  .tick i {
+    position: absolute; bottom: 26px; left: 0; transform: translateX(-50%);
+    font-style: normal; font-size: .75rem; color: var(--dim); white-space: nowrap;
+  }
+
+  /* Controls */
+  #top, #hud {
+    position: fixed; left: 0; right: 0; z-index: 5;
+    background: var(--panel); backdrop-filter: blur(6px);
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+  }
+  #top { top: 0; border-bottom: 1px solid var(--rule); }
+  #hud { bottom: 0; border-top: 1px solid var(--rule); justify-content: space-between; }
+  button, select {
+    font: inherit; font-size: .9rem; color: var(--ink);
+    background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--ink); }
+  button:focus-visible, select:focus-visible { outline: 2px solid #ffb347; outline-offset: 2px; }
+  button[aria-pressed="true"] { background: #ffb347; border-color: #ffb347; color: #1a0f00; }
+  #readout { font-variant-numeric: tabular-nums; font-size: .95rem; }
+  #readout em { color: var(--dim); font-style: normal; }
+  #hint { color: var(--dim); font-size: .85rem; }
+  #center-mark {
+    position: fixed; left: 50%; top: 0; bottom: 0; width: 1px; z-index: 1;
+    background: linear-gradient(transparent 40%, rgba(255,179,71,.35) 50%, transparent 60%);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<nav id="top" aria-label="Jump to a body"></nav>
+<div id="viewport" tabindex="0" aria-label="Solar system to scale. Scroll horizontally.">
+  <div id="track"></div>
+</div>
+<div id="center-mark"></div>
+
+<div id="hud">
+  <div id="readout" aria-live="off"></div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <label for="speed" id="hint">Scroll speed</label>
+    <select id="speed">
+      <option value="1">x1</option>
+      <option value="10" selected>x10</option>
+      <option value="100">x100</option>
+      <option value="1000">x1000</option>
+    </select>
+    <button id="photon" aria-pressed="false">Ride a beam of light</button>
+  </div>
+</div>
+
+<script>
+/* ---------- Scale: change this one number to zoom everything ---------- */
+const KM_PER_PX = 1000;                 // 1 screen pixel = 1,000 km
+/* ----------------------------------------------------------------------- */
+
+const AU_KM = 149597870.7;
+const C_KM_S = 299792.458;              // speed of light
+const LIGHT_PX_PER_S = C_KM_S / KM_PER_PX;
+
+// d = diameter (km), a = mean distance from Sun (km)
+const BODIES = [
+  { name: "Sun",     d: 1392684, a: 0,        fill: "radial-gradient(circle at 38% 38%, #fff4b8, #ffb300 55%, #ff7a00)", glow: true },
+  { name: "Mercury", d: 4879,    a: 57.9e6,   fill: "#9d9890" },
+  { name: "Venus",   d: 12104,   a: 108.2e6,  fill: "#e3c27a" },
+  { name: "Earth",   d: 12742,   a: 149.6e6,  fill: "radial-gradient(circle at 35% 35%, #7fb8ff, #1f5fb4)" },
+  { name: "Mars",    d: 6779,    a: 227.9e6,  fill: "#c1623c" },
+  { name: "Jupiter", d: 139820,  a: 778.5e6,  fill: "linear-gradient(#d9b48f, #b98a62 30%, #e3c9a6 55%, #a87a55)" },
+  { name: "Saturn",  d: 116460,  a: 1432e6,   fill: "linear-gradient(#e6d3a0, #cdb27a 50%, #e8d9b0)" },
+  { name: "Uranus",  d: 50724,   a: 2867e6,   fill: "#9fd8dc" },
+  { name: "Neptune", d: 49244,   a: 4515e6,   fill: "#4b6fe0" }
+];
+
+const px = km => km / KM_PER_PX;
+const SUN_R = px(BODIES[0].d / 2);
+const xOf = b => SUN_R + px(b.a);       // centre of each body, measured from track's left edge
+
+const viewport = document.getElementById("viewport");
+const track = document.getElementById("track");
+const nav = document.getElementById("top");
+const readout = document.getElementById("readout");
+
+track.style.width = Math.ceil(xOf(BODIES.at(-1)) + 1200) + "px";
+
+/* Build bodies, labels, jump buttons */
+const fmt = n => Math.round(n).toLocaleString("en-US");
+BODIES.forEach(b => {
+  const x = xOf(b), size = px(b.d);
+
+  if (size < 20) {                       // tiny bodies get a ring so you can spot them
+    const h = document.createElement("div");
+    h.className = "halo"; h.style.left = x + "px";
+    track.appendChild(h);
+  }
+
+  const el = document.createElement("div");
+  el.className = "body";
+  el.style.cssText = `left:${x}px; width:${size}px; height:${size}px; background:${b.fill};`;
+  if (b.glow) el.style.boxShadow = "0 0 120px 30px rgba(255,160,40,.35)";
+  track.appendChild(el);
+
+  const tag = document.createElement("div");
+  tag.className = "tag" + (b.name === "Sun" ? " on-sun" : "");
+  tag.style.left = x + "px";
+  tag.style.top = b.name === "Sun" ? "50%" : `calc(50% - ${size / 2 + 14}px)`;
+  const dist = b.a ? `${(b.a / AU_KM).toFixed(2)} AU from the Sun` : "Diameter 1,392,684 km";
+  tag.innerHTML = `<b>${b.name}</b><span>${dist}</span>` +
+                  (b.a ? `<span><br>${fmt(b.d)} km wide</span>` : "");
+  track.appendChild(tag);
+
+  const btn = document.createElement("button");
+  btn.textContent = b.name;
+  btn.onclick = () => { viewport.scrollLeft = x - viewport.clientWidth / 2; };
+  nav.appendChild(btn);
+});
+
+/* AU ruler */
+for (let au = 1; au <= 30; au++) {
+  const t = document.createElement("div");
+  t.className = "tick";
+  t.style.left = (SUN_R + px(au * AU_KM)) + "px";
+  t.innerHTML = `<i>${au} AU</i>`;
+  track.appendChild(t);
+}
+
+/* Readout: distance from the Sun at screen centre + how long light takes to get there */
+function hms(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  return h ? `${h} h ${m} min ${sec} s` : m ? `${m} min ${sec} s` : `${sec} s`;
+}
+function update() {
+  const centre = viewport.scrollLeft + viewport.clientWidth / 2;
+  const km = Math.max(0, (centre - SUN_R) * KM_PER_PX);
+  readout.innerHTML =
+    `<em>Distance from the Sun:</em> ${(km / 1e6).toFixed(1)} million km (${(km / AU_KM).toFixed(2)} AU)` +
+    ` &nbsp; <em>Light takes</em> ${hms(km / C_KM_S)}`;
+}
+viewport.addEventListener("scroll", update, { passive: true });
+
+/* Input: wheel, drag, keyboard, light-speed autoscroll */
+const speedSel = document.getElementById("speed");
+const mult = () => Number(speedSel.value);
+
+viewport.addEventListener("wheel", e => {
+  e.preventDefault();
+  viewport.scrollLeft += (e.deltaY + e.deltaX) * mult();
+}, { passive: false });
+
+let drag = null;
+viewport.addEventListener("pointerdown", e => {
+  if (e.pointerType !== "mouse") return;      // touch uses native horizontal scrolling
+  drag = { x: e.clientX, left: viewport.scrollLeft };
+  viewport.setPointerCapture(e.pointerId);
+  viewport.classList.add("dragging");
+});
+viewport.addEventListener("pointermove", e => {
+  if (drag) viewport.scrollLeft = drag.left - (e.clientX - drag.x);
+});
+const endDrag = () => { drag = null; viewport.classList.remove("dragging"); };
+viewport.addEventListener("pointerup", endDrag);
+viewport.addEventListener("pointercancel", endDrag);
+
+const keys = new Set();
+addEventListener("keydown", e => {
+  if (["ArrowLeft", "ArrowRight"].includes(e.key)) { keys.add(e.key); e.preventDefault(); }
+});
+addEventListener("keyup", e => keys.delete(e.key));
+
+const photonBtn = document.getElementById("photon");
+let photon = false;
+photonBtn.onclick = () => {
+  photon = !photon;
+  photonBtn.setAttribute("aria-pressed", photon);
+};
+
+let last = performance.now();
+function frame(now) {
+  const dt = (now - last) / 1000; last = now;
+  let v = 0;
+  if (keys.has("ArrowRight")) v += 600 * mult();
+  if (keys.has("ArrowLeft"))  v -= 600 * mult();
+  if (photon) v += LIGHT_PX_PER_S;            // exactly the speed of light at this scale (~300 px/s)
+  if (v) viewport.scrollLeft += v * dt;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+update();
+viewport.focus();
+</script>
+</body>
+</html>
