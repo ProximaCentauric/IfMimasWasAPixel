@@ -176,11 +176,16 @@ const SATURN_RINGS = [
 // au = semi-major axis (AU), est = size is an estimate
 const TNO = "Trans-Neptunian object";
 const SMALL = [
-  { name: "Bennu",    au: 1.126, d: 0.49,  kind: "Asteroid", fill: "#7a7570" },
+  { name: "Apophis",    au: 0.922, d: 0.37,  kind: "Asteroid", fill: "#515155" },
+  { name: "Bennu",    au: 1.126, d: 0.53,  kind: "Asteroid", fill: "#7a7570" },
+  { name: "Eros",    au: 1.458, d: 16.84,  kind: "Asteroid", fill: "#bfa37a" },
+  { name: "Didymos",    au: 1.644, d: 0.85,  kind: "Asteroid", fill: "#515155" },
   { name: "Vesta",    au: 2.362, d: 525.4, kind: "Asteroid", fill: "#b9b2a6" },
+  { name: "Eunomia",    au: 2.642, d: 340, kind: "Asteroid", fill: "#d5d1cf" },
   { name: "Juno",     au: 2.669, d: 233.9, kind: "Asteroid", fill: "#9c948c" },
   { name: "Ceres",   au: 2.767, d: 966,   kind: "Dwarf planet", fill: "#5c5956" },
   { name: "Pallas",   au: 2.771, d: 512,   kind: "Asteroid", fill: "#8f8a85" },
+  { name: "Ida",   au: 2.861, d: 15.7,   kind: "Asteroid", fill: "#74787d" },
   { name: "Psyche",   au: 2.92,  d: 226,   kind: "Asteroid", fill: "#a29b94" },
   { name: "Europa (asteroid)", au: 3.09, d: 315, kind: "Asteroid", fill: "#6f6a66" },
   { name: "Hygiea",   au: 3.142, d: 434,   kind: "Asteroid", fill: "#6f6a66" },
@@ -188,7 +193,9 @@ const SMALL = [
   { name: "Orcus",    au: 39.17, d: 910,   kind: TNO, est: true, fill: "#8c8a8f" },
   { name: "Pluto",    au: 39.48, d: 2376.6, kind: "Dwarf planet", fill: "#c9b49a" },
   { name: "Ixion",    au: 39.7,  d: 650,   kind: TNO, est: true, fill: "#8a5a4a" },
-  { name: "Salacia",  au: 42.2,  d: 846,   kind: TNO, est: true, fill: "#6f6a70" },
+  { name: "Máni",    au: 41.74,  d: 824,   kind: TNO, est: true, fill: "#307261" },
+  { name: "Salacia",  au: 42.18,  d: 846,   kind: TNO, est: true, fill: "#6f6a70" },
+  { name: "2005 UQ213",  au: 42.213,  d: 498,   kind: TNO, est: true, fill: "#7b221c" },
   { name: "Varuna",   au: 42.8,  d: 668,   kind: TNO, est: true, fill: "#8f6b55" },
   { name: "Haumea",   au: 43.12, d: 1632,  kind: "Dwarf planet", fill: "#d8dde6" },
   { name: "Quaoar",   au: 43.69, d: 1110,  kind: TNO, fill: "#a0522d" },
@@ -196,6 +203,8 @@ const SMALL = [
   { name: "Gonggong", au: 67.49, d: 1230,  kind: TNO, est: true, fill: "#a85a4a" },
   { name: "Eris",     au: 67.86, d: 2326,  kind: "Dwarf planet", fill: "#e9e9ee" },
   { name: "Gǃkúnǁʼhòmdímà", au: 74, d: 640, kind: TNO, est: true, fill: "#8a5a50" },
+  { name: "Farout", au: 123, d: 640, kind: TNO, est: true, fill: "#8a5a50" },
+  { name: "Farfarout", au: 132.2, d: 400, kind: TNO, est: true, fill: "#8a5a50" },
   { name: "Sedna",    au: 506,   d: 995,   kind: TNO, est: true, fill: "#b5442e",
     note: "506 AU on average, ranging from 76 to 937 AU" }
 ];
