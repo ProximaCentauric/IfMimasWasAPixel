@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Solar System, Actually to Scale</title>
-<meta name="description" content="Scroll across the solar system at true scale, 1 pixel = 1,000 km.">
-<meta property="og:title" content="The Solar System, Actually to Scale">
-<meta property="og:description" content="Ride a beam of light from the Sun to Neptune.">
+<title>If Mimas Was a Pixel</title>
+<meta name="description" content="A solar system scale model where Mimas, Saturn's moon, is a single pixel.">
+<meta property="og:title" content="If Mimas Was a Pixel">
+<meta property="og:description" content="Scroll the solar system at true scale, with Mimas as one pixel. Ride a beam of light from the Sun to Sedna.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>">
 <style>
   :root {
@@ -23,15 +23,9 @@
     background: var(--space); color: var(--ink); font-family: var(--serif);
   }
 
-  /* The scrolling world */
-  #viewport {
-    position: absolute; inset: 0;
-    overflow-x: scroll; overflow-y: hidden;
-    cursor: grab; scrollbar-width: thin; scrollbar-color: #3a4054 transparent;
-  }
-  #viewport.dragging { cursor: grabbing; }
-  #track {
-    position: relative; height: 100%;
+  /* The world: a fixed stage that a virtual camera slides across */
+  #stage {
+    position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab;
     background-image:
       radial-gradient(1px 1px at 37px 61px,   rgba(255,255,255,.9), transparent),
       radial-gradient(1px 1px at 190px 140px, rgba(255,255,255,.6), transparent),
@@ -39,6 +33,7 @@
       radial-gradient(1px 1px at 520px 90px,  rgba(255,255,255,.5), transparent);
     background-size: 413px 311px, 577px 389px, 701px 463px, 853px 521px;
   }
+  #stage.dragging { cursor: grabbing; }
 
   /* Bodies */
   .body { position: absolute; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); }
@@ -46,18 +41,18 @@
     position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%;
     border: 1px solid var(--rule); transform: translate(-50%, -50%);
   }
+  .halo.sub { border-style: dashed; border-color: rgba(255, 179, 71, .55); }   /* dashed = smaller than 1 pixel */
   .tag {
     position: absolute; transform: translate(-50%, -100%);
     text-align: center; white-space: nowrap; line-height: 1.3; pointer-events: none;
   }
+  .tag.below { transform: translate(-50%, 0); }
   .tag b { display: block; font-size: 1.05rem; font-weight: 600; }
   .tag span { font-size: .8rem; color: var(--dim); }
   .tag.on-sun { transform: translate(-50%, -50%); color: #3b1c00; }
   .tag.on-sun span { color: #5a2d00; }
-  .tag::after {
-    content: ""; display: block; width: 1px; height: 18px; margin: 4px auto 0; background: var(--rule);
-  }
-  .tag.on-sun::after { display: none; }
+  .stem { display: block; width: 1px; height: 18px; background: var(--rule); margin: 4px auto 0; }
+  .tag.below .stem { margin: 0 auto 4px; }
 
   /* AU ruler */
   .tick { position: absolute; bottom: 96px; width: 1px; height: 22px; background: var(--rule); }
@@ -73,18 +68,22 @@
     padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
   }
   #top { top: 0; border-bottom: 1px solid var(--rule); }
-  #hud { bottom: 0; border-top: 1px solid var(--rule); justify-content: space-between; }
+  #top strong { font-size: 1.05rem; margin-right: 6px; }
+  #hud { bottom: 0; border-top: 1px solid var(--rule); }
   button, select {
     font: inherit; font-size: .9rem; color: var(--ink);
     background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px;
     cursor: pointer;
   }
+  select option, select optgroup { background: #0d111c; color: var(--ink); }
   button:hover, select:hover { border-color: var(--ink); }
-  button:focus-visible, select:focus-visible { outline: 2px solid #ffb347; outline-offset: 2px; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #ffb347; outline-offset: 2px; }
   button[aria-pressed="true"] { background: #ffb347; border-color: #ffb347; color: #1a0f00; }
   #readout { font-variant-numeric: tabular-nums; font-size: .95rem; }
   #readout em { color: var(--dim); font-style: normal; }
-  #hint { color: var(--dim); font-size: .85rem; }
+  #hint, #legend { color: var(--dim); font-size: .85rem; }
+  #scrub { flex: 1 1 160px; min-width: 120px; accent-color: #ffb347; }
+  #controls { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
   #center-mark {
     position: fixed; left: 50%; top: 0; bottom: 0; width: 1px; z-index: 1;
     background: linear-gradient(transparent 40%, rgba(255,179,71,.35) 50%, transparent 60%);
@@ -94,139 +93,301 @@
 </head>
 <body>
 
-<nav id="top" aria-label="Jump to a body"></nav>
-<div id="viewport" tabindex="0" aria-label="Solar system to scale. Scroll horizontally.">
-  <div id="track"></div>
-</div>
+<nav id="top" aria-label="Jump to a body"><strong>If Mimas Was a Pixel</strong></nav>
+<div id="stage" aria-label="Solar system to scale. Drag, scroll or use the arrow keys."></div>
 <div id="center-mark"></div>
 
 <div id="hud">
   <div id="readout" aria-live="off"></div>
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+  <input type="range" id="scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the solar system">
+  <div id="controls">
+    <span id="legend">Dashed ring: smaller than one pixel</span>
     <label for="speed" id="hint">Scroll speed</label>
     <select id="speed">
       <option value="1">x1</option>
-      <option value="10" selected>x10</option>
-      <option value="100">x100</option>
-      <option value="1000">x1000</option>
+      <option value="10">x10</option>
+      <option value="100" selected>x100</option>
+      <option value="1000">x1,000</option>
+      <option value="10000">x10,000</option>
+      <option value="100000">x100,000</option>
     </select>
     <button id="photon" aria-pressed="false">Ride a beam of light</button>
   </div>
 </div>
 
 <script>
-/* ---------- Scale: change this one number to zoom everything ---------- */
-const KM_PER_PX = 1000;                 // 1 screen pixel = 1,000 km
-/* ----------------------------------------------------------------------- */
+/* ---------- Scale: Mimas (396.4 km wide) = 1 pixel ---------- */
+const KM_PER_PX = 396.4;
+/* ------------------------------------------------------------ */
 
 const AU_KM = 149597870.7;
 const C_KM_S = 299792.458;              // speed of light
 const LIGHT_PX_PER_S = C_KM_S / KM_PER_PX;
+const fmt = n => Math.round(n).toLocaleString("en-US");
 
-// d = diameter (km), a = mean distance from Sun (km)
-const BODIES = [
-  { name: "Sun",     d: 1392684, a: 0,        fill: "radial-gradient(circle at 38% 38%, #fff4b8, #ffb300 55%, #ff7a00)", glow: true },
-  { name: "Mercury", d: 4879,    a: 57.9e6,   fill: "#9d9890" },
-  { name: "Venus",   d: 12104,   a: 108.2e6,  fill: "#e3c27a" },
-  { name: "Earth",   d: 12742,   a: 149.6e6,  fill: "radial-gradient(circle at 35% 35%, #7fb8ff, #1f5fb4)" },
-  { name: "Mars",    d: 6779,    a: 227.9e6,  fill: "#c1623c" },
-  { name: "Jupiter", d: 139820,  a: 778.5e6,  fill: "linear-gradient(#d9b48f, #b98a62 30%, #e3c9a6 55%, #a87a55)" },
-  { name: "Saturn",  d: 116460,  a: 1432e6,   fill: "linear-gradient(#e6d3a0, #cdb27a 50%, #e8d9b0)" },
-  { name: "Uranus",  d: 50724,   a: 2867e6,   fill: "#9fd8dc" },
-  { name: "Neptune", d: 49244,   a: 4515e6,   fill: "#4b6fe0" }
+// Planets: d = diameter (km), a = mean distance from the Sun (km)
+const PLANETS = [
+  { name: "Sun",     d: 1392684, a: 0,       fill: "radial-gradient(circle at 38% 38%, #fff4b8, #ffb300 55%, #ff7a00)", glow: true },
+  { name: "Mercury", d: 4879,    a: 57.9e6,  fill: "#9d9890" },
+  { name: "Venus",   d: 12104,   a: 108.2e6, fill: "#e3c27a" },
+  { name: "Earth",   d: 12742,   a: 149.6e6, fill: "radial-gradient(circle at 35% 35%, #7fb8ff, #1f5fb4)" },
+  { name: "Mars",    d: 6779,    a: 227.9e6, fill: "#c1623c" },
+  { name: "Jupiter", d: 139820,  a: 778.5e6, fill: "linear-gradient(#d9b48f, #b98a62 30%, #e3c9a6 55%, #a87a55)" },
+  { name: "Saturn",  d: 116460,  a: 1432e6,  fill: "linear-gradient(#e6d3a0, #cdb27a 50%, #e8d9b0)" },
+  { name: "Uranus",  d: 50724,   a: 2867e6,  fill: "#9fd8dc" },
+  { name: "Neptune", d: 49244,   a: 4515e6,  fill: "#4b6fe0" }
 ];
 
-const px = km => km / KM_PER_PX;
-const SUN_R = px(BODIES[0].d / 2);
-const xOf = b => SUN_R + px(b.a);       // centre of each body, measured from track's left edge
+// Asteroids, dwarf planets and other small bodies, sorted by distance
+// au = semi-major axis (AU), est = size is an estimate
+const TNO = "Trans-Neptunian object";
+const SMALL = [
+  { name: "Bennu",    au: 1.126, d: 0.49,  kind: "Asteroid", fill: "#7a7570" },
+  { name: "Vesta",    au: 2.362, d: 525.4, kind: "Asteroid", fill: "#b9b2a6" },
+  { name: "Juno",     au: 2.669, d: 233.9, kind: "Asteroid", fill: "#9c948c" },
+  { name: "Pallas",   au: 2.771, d: 512,   kind: "Asteroid", fill: "#8f8a85" },
+  { name: "Psyche",   au: 2.92,  d: 226,   kind: "Asteroid", fill: "#a29b94" },
+  { name: "Europa (asteroid)", au: 3.09, d: 315, kind: "Asteroid", fill: "#6f6a66" },
+  { name: "Hygiea",   au: 3.142, d: 434,   kind: "Asteroid", fill: "#6f6a66" },
+  { name: "Chariklo", au: 15.8,  d: 250,   kind: "Centaur", est: true, fill: "#8a6f60" },
+  { name: "Orcus",    au: 39.17, d: 910,   kind: TNO, est: true, fill: "#8c8a8f" },
+  { name: "Pluto",    au: 39.48, d: 2376.6, kind: "Dwarf planet", fill: "#c9b49a" },
+  { name: "Ixion",    au: 39.7,  d: 650,   kind: TNO, est: true, fill: "#8a5a4a" },
+  { name: "Salacia",  au: 42.2,  d: 846,   kind: TNO, est: true, fill: "#6f6a70" },
+  { name: "Varuna",   au: 42.8,  d: 668,   kind: TNO, est: true, fill: "#8f6b55" },
+  { name: "Haumea",   au: 43.12, d: 1632,  kind: "Dwarf planet", fill: "#d8dde6" },
+  { name: "Quaoar",   au: 43.69, d: 1110,  kind: TNO, fill: "#a0522d" },
+  { name: "Makemake", au: 45.51, d: 1430,  kind: "Dwarf planet", fill: "#c58a6a" },
+  { name: "Gonggong", au: 67.49, d: 1230,  kind: TNO, est: true, fill: "#a85a4a" },
+  { name: "Eris",     au: 67.86, d: 2326,  kind: "Dwarf planet", fill: "#e9e9ee" },
+  { name: "Gǃkúnǁʼhòmdímà", au: 74, d: 640, kind: TNO, est: true, fill: "#8a5a50" },
+  { name: "Sedna",    au: 506,   d: 995,   kind: TNO, est: true, fill: "#b5442e",
+    note: "506 AU on average, ranging from 76 to 937 AU" }
+];
 
-const viewport = document.getElementById("viewport");
-const track = document.getElementById("track");
+// Moons: orbit = mean distance from the parent (km), grouped by parent and sorted by distance
+// lane: 1 = label above, 2 = higher above, -1 = label below, -2 = lower below (keeps crowded labels apart)
+const MOONS = [
+  { name: "Moon",      parent: "Earth",   d: 3474.8, orbit: 384400,   fill: "#b8b5ad", lane: 1 },
+
+  { name: "Phobos",    parent: "Mars",    d: 22.2,   orbit: 9376,     fill: "#8a7f76", lane: -1 },
+  { name: "Deimos",    parent: "Mars",    d: 12.4,   orbit: 23463,    fill: "#9a8f86", lane: 2 },
+
+  { name: "Amalthea",  parent: "Jupiter", d: 167,    orbit: 181366,   fill: "#a8553f", lane: -1 },
+  { name: "Io",        parent: "Jupiter", d: 3643,   orbit: 421700,   fill: "#e6d36a", lane: 1 },
+  { name: "Europa",    parent: "Jupiter", d: 3122,   orbit: 671100,   fill: "#d9cdb4", lane: 1 },
+  { name: "Ganymede",  parent: "Jupiter", d: 5268,   orbit: 1070400,  fill: "#9a8f84", lane: 1 },
+  { name: "Callisto",  parent: "Jupiter", d: 4821,   orbit: 1882700,  fill: "#5f564c", lane: 1 },
+
+  { name: "Pan",       parent: "Saturn",  d: 28.2,   orbit: 133584,   fill: "#cfcac2", lane: -1 },
+  { name: "Mimas",     parent: "Saturn",  d: 396.4,  orbit: 185540,   fill: "#ffffff", lane: 1 },
+  { name: "Enceladus", parent: "Saturn",  d: 504.2,  orbit: 238020,   fill: "#ffffff", lane: -1 },
+  { name: "Tethys",    parent: "Saturn",  d: 1062,   orbit: 294620,   fill: "#e2e2e2", lane: 2 },
+  { name: "Dione",     parent: "Saturn",  d: 1123,   orbit: 377400,   fill: "#cfcfcf", lane: -2 },
+  { name: "Rhea",      parent: "Saturn",  d: 1527,   orbit: 527100,   fill: "#b9b6b0", lane: 1 },
+  { name: "Titan",     parent: "Saturn",  d: 5150,   orbit: 1221900,  fill: "#d79a3b", lane: 1 },
+  { name: "Hyperion",  parent: "Saturn",  d: 270,    orbit: 1481100,  fill: "#b59a85", lane: -1 },
+  { name: "Iapetus",   parent: "Saturn",  d: 1469,   orbit: 3560800,  fill: "#8a7f73", lane: 1 },
+  { name: "Phoebe",    parent: "Saturn",  d: 213,    orbit: 12947780, fill: "#6b6560", lane: 1 },
+
+  { name: "Cupid",     parent: "Uranus",  d: 18,     orbit: 74392,    fill: "#a8a4a0", lane: -1 },
+  { name: "Puck",      parent: "Uranus",  d: 162,    orbit: 86010,    fill: "#9d9894", lane: 2 },
+  { name: "Miranda",   parent: "Uranus",  d: 471.6,  orbit: 129390,   fill: "#a8a4a0", lane: 1 },
+  { name: "Ariel",     parent: "Uranus",  d: 1157.8, orbit: 191020,   fill: "#bdb9b4", lane: -1 },
+  { name: "Umbriel",   parent: "Uranus",  d: 1169.4, orbit: 266300,   fill: "#6e6a68", lane: 1 },
+  { name: "Titania",   parent: "Uranus",  d: 1576.8, orbit: 435910,   fill: "#a39a94", lane: -1 },
+  { name: "Oberon",    parent: "Uranus",  d: 1522.8, orbit: 583520,   fill: "#8d7f77", lane: 1 },
+  { name: "Sycorax",   parent: "Uranus",  d: 157,    orbit: 12179400, fill: "#8a6f68", lane: -1 },
+
+  { name: "Hippocamp", parent: "Neptune", d: 34.8,   orbit: 105283,   fill: "#9a98a0", lane: -1 },
+  { name: "Proteus",   parent: "Neptune", d: 420,    orbit: 117647,   fill: "#6d6a69", lane: 1 },
+  { name: "Triton",    parent: "Neptune", d: 2706.8, orbit: 354759,   fill: "#d9c7c0", lane: -1 },
+  { name: "Nereid",    parent: "Neptune", d: 340,    orbit: 5513800,  fill: "#a0a0a8", lane: 1 },
+  { name: "Neso",      parent: "Neptune", d: 60,     orbit: 50258000, fill: "#8f8d96", lane: 1 },
+
+  { name: "Charon",    parent: "Pluto",   d: 1212,   orbit: 19591,    fill: "#8f8a88", lane: -1 }
+];
+
+const SMALL_A = SMALL.map(s => ({ ...s, a: s.au * AU_KM, small: true }));
+const PARENTS = PLANETS.concat(SMALL_A);
+// Moons sit on the same side of their parent, at their real mean orbital distance
+const BODIES = PLANETS.concat(SMALL_A, MOONS.map(m => ({
+  ...m,
+  moon: true,
+  a: PARENTS.find(p => p.name === m.parent).a + m.orbit,
+  note: `Orbits ${m.parent} at ${fmt(m.orbit)} km`
+})));
+
+const px = km => km / KM_PER_PX;
+const SUN_R = px(PLANETS[0].d / 2);
+const xOf = b => SUN_R + px(b.a);       // world x of each body's centre
+const WORLD_W = Math.max(...BODIES.map(xOf)) + 1200;
+
+const stage = document.getElementById("stage");
 const nav = document.getElementById("top");
 const readout = document.getElementById("readout");
+const scrub = document.getElementById("scrub");
+const speedSel = document.getElementById("speed");
+const mult = () => Number(speedSel.value);
 
-track.style.width = Math.ceil(xOf(BODIES.at(-1)) + 1200) + "px";
+/* ---------- Virtual camera (no browser scroll-width limit) ---------- */
+let camLeft = 0;                         // world x at the left edge of the screen
+let dirty = true;
+const maxCam = () => Math.max(0, WORLD_W - stage.clientWidth);
+const setCam = v => { camLeft = Math.min(Math.max(0, v), maxCam()); dirty = true; };
+const goTo = x => setCam(x - stage.clientWidth / 2);
 
-/* Build bodies, labels, jump buttons */
-const fmt = n => Math.round(n).toLocaleString("en-US");
+/* Everything drawn on the stage registers here; only items near the screen are shown */
+const items = [];
+function add(el, x, halfWidth) {
+  el.style.display = "none";
+  stage.appendChild(el);
+  items.push({ el, x, hw: halfWidth, vis: false });
+}
+
+/* Jump menus */
+function makeMenu(label) {
+  const s = document.createElement("select");
+  s.setAttribute("aria-label", label);
+  s.innerHTML = `<option value="">${label}</option>`;
+  s.onchange = () => { if (s.value) goTo(Number(s.value)); s.value = ""; };
+  return s;
+}
+const moonMenu = makeMenu("Jump to a moon");
+const smallMenu = makeMenu("Jump to an asteroid or dwarf planet");
+const groups = {};
+
+/* Build bodies, labels, jump controls */
 BODIES.forEach(b => {
   const x = xOf(b), size = px(b.d);
 
   if (size < 20) {                       // tiny bodies get a ring so you can spot them
     const h = document.createElement("div");
-    h.className = "halo"; h.style.left = x + "px";
-    track.appendChild(h);
+    h.className = "halo" + (size < 1 ? " sub" : "");   // dashed ring = under one pixel
+    add(h, x, 60);
   }
 
   const el = document.createElement("div");
   el.className = "body";
-  el.style.cssText = `left:${x}px; width:${size}px; height:${size}px; background:${b.fill};`;
+  el.style.cssText = `width:${size}px; height:${size}px; background:${b.fill};`;
   if (b.glow) el.style.boxShadow = "0 0 120px 30px rgba(255,160,40,.35)";
-  track.appendChild(el);
+  add(el, x, size / 2 + 150);
+
+  /* Label */
+  const isSun = b.name === "Sun";
+  const lane = b.lane || 1;
+  const below = lane < 0;
+  const reach = size < 20 ? 15 : size / 2;                 // clear the body (or its ring)
+  const offset = reach + 14 + (Math.abs(lane) - 1) * 95;   // extra height for crowded lanes
 
   const tag = document.createElement("div");
-  tag.className = "tag" + (b.name === "Sun" ? " on-sun" : "");
-  tag.style.left = x + "px";
-  tag.style.top = b.name === "Sun" ? "50%" : `calc(50% - ${size / 2 + 14}px)`;
-  const dist = b.a ? `${(b.a / AU_KM).toFixed(2)} AU from the Sun` : "Diameter 1,392,684 km";
-  tag.innerHTML = `<b>${b.name}</b><span>${dist}</span>` +
-                  (b.a ? `<span><br>${fmt(b.d)} km wide</span>` : "");
-  track.appendChild(tag);
+  tag.className = "tag" + (isSun ? " on-sun" : "") + (below ? " below" : "");
+  tag.style.top = isSun ? "50%" : below ? `calc(50% + ${offset}px)` : `calc(50% - ${offset}px)`;
 
-  const btn = document.createElement("button");
-  btn.textContent = b.name;
-  btn.onclick = () => { viewport.scrollLeft = x - viewport.clientWidth / 2; };
-  nav.appendChild(btn);
+  const au = b.a / AU_KM;
+  const line1 = b.note || (b.a ? `${au.toFixed(au >= 100 ? 0 : 2)} AU from the Sun` : "Diameter 1,392,684 km");
+  const sizeKm = b.d < 10 ? b.d.toString() : fmt(b.d);
+  const line2 = b.a ? `${b.kind ? b.kind + ", " : ""}${b.est ? "about " : ""}${sizeKm} km wide` : "";
+  const line3 = size < 1 ? `${size.toPrecision(2)} of a pixel`
+              : b.name === "Mimas" ? "exactly 1 pixel" : "";
+  const text = `<b>${b.name}</b><span>${line1}</span>` +
+               (line2 ? `<span><br>${line2}</span>` : "") +
+               (line3 ? `<span><br>${line3}</span>` : "");
+  const stem = isSun ? "" : `<i class="stem"></i>`;
+  tag.innerHTML = below ? stem + text : text + stem;
+  add(tag, x, 220);
+
+  /* Jump controls: planets get buttons, small bodies and moons get dropdowns */
+  if (b.moon) {
+    if (!groups[b.parent]) {
+      groups[b.parent] = document.createElement("optgroup");
+      groups[b.parent].label = b.parent;
+      moonMenu.appendChild(groups[b.parent]);
+    }
+    const opt = document.createElement("option");
+    opt.value = x; opt.textContent = b.name;
+    groups[b.parent].appendChild(opt);
+  } else if (b.small) {
+    const opt = document.createElement("option");
+    opt.value = x; opt.textContent = b.name;
+    smallMenu.appendChild(opt);
+  } else {
+    const btn = document.createElement("button");
+    btn.textContent = b.name;
+    btn.onclick = () => goTo(x);
+    nav.appendChild(btn);
+  }
 });
+nav.appendChild(smallMenu);
+nav.appendChild(moonMenu);
 
-/* AU ruler */
-for (let au = 1; au <= 30; au++) {
+/* AU ruler: every AU to 30, every 10 AU to 100, then every 100 AU */
+const TICKS = [];
+for (let i = 1; i <= 30; i++) TICKS.push(i);
+for (let i = 40; i <= 100; i += 10) TICKS.push(i);
+for (let i = 200; i <= 500; i += 100) TICKS.push(i);
+TICKS.forEach(au => {
   const t = document.createElement("div");
   t.className = "tick";
-  t.style.left = (SUN_R + px(au * AU_KM)) + "px";
   t.innerHTML = `<i>${au} AU</i>`;
-  track.appendChild(t);
+  add(t, SUN_R + px(au * AU_KM), 80);
+});
+
+/* ---------- Drawing ---------- */
+const TILES = [413, 577, 701, 853];       // star-field tile widths (match background-size)
+
+function hms(s) {
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  return d ? `${d} d ${h} h ${m} min` : h ? `${h} h ${m} min ${sec} s` : m ? `${m} min ${sec} s` : `${sec} s`;
 }
 
-/* Readout: distance from the Sun at screen centre + how long light takes to get there */
-function hms(s) {
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
-  return h ? `${h} h ${m} min ${sec} s` : m ? `${m} min ${sec} s` : `${sec} s`;
-}
-function update() {
-  const centre = viewport.scrollLeft + viewport.clientWidth / 2;
+function render() {
+  const vw = stage.clientWidth;
+  for (const it of items) {
+    const sx = it.x - camLeft;
+    const vis = sx > -it.hw && sx < vw + it.hw;
+    if (vis !== it.vis) { it.el.style.display = vis ? "" : "none"; it.vis = vis; }
+    if (vis) it.el.style.left = sx + "px";
+  }
+  stage.style.backgroundPosition = TILES.map(t => `${-(camLeft % t)}px 0`).join(",");
+
+  const centre = camLeft + vw / 2;
   const km = Math.max(0, (centre - SUN_R) * KM_PER_PX);
   readout.innerHTML =
-    `<em>Distance from the Sun:</em> ${(km / 1e6).toFixed(1)} million km (${(km / AU_KM).toFixed(2)} AU)` +
-    ` &nbsp; <em>Light takes</em> ${hms(km / C_KM_S)}`;
+    `<em>Distance from the Sun:</em> ${(km / 1e6).toLocaleString("en-US", { maximumFractionDigits: 1 })} million km ` +
+    `(${(km / AU_KM).toFixed(2)} AU) &nbsp; <em>Light takes</em> ${hms(km / C_KM_S)}`;
+
+  // Slider uses a cubic curve so the inner planets aren't squashed into the first pixel
+  scrub.value = String(Math.cbrt(camLeft / Math.max(1, maxCam())) * 1000);
 }
-viewport.addEventListener("scroll", update, { passive: true });
 
-/* Input: wheel, drag, keyboard, light-speed autoscroll */
-const speedSel = document.getElementById("speed");
-const mult = () => Number(speedSel.value);
-
-viewport.addEventListener("wheel", e => {
+/* ---------- Input: wheel, drag, slider, keyboard, light-speed ---------- */
+stage.addEventListener("wheel", e => {
   e.preventDefault();
-  viewport.scrollLeft += (e.deltaY + e.deltaX) * mult();
+  const k = e.deltaMode === 1 ? 33 : 1;
+  setCam(camLeft + (e.deltaY + e.deltaX) * k * mult());
 }, { passive: false });
 
 let drag = null;
-viewport.addEventListener("pointerdown", e => {
-  if (e.pointerType !== "mouse") return;      // touch uses native horizontal scrolling
-  drag = { x: e.clientX, left: viewport.scrollLeft };
-  viewport.setPointerCapture(e.pointerId);
-  viewport.classList.add("dragging");
+stage.addEventListener("pointerdown", e => {
+  drag = { x: e.clientX, cam: camLeft };
+  stage.setPointerCapture(e.pointerId);
+  stage.classList.add("dragging");
 });
-viewport.addEventListener("pointermove", e => {
-  if (drag) viewport.scrollLeft = drag.left - (e.clientX - drag.x);
+stage.addEventListener("pointermove", e => {
+  if (drag) setCam(drag.cam - (e.clientX - drag.x) * mult());
 });
-const endDrag = () => { drag = null; viewport.classList.remove("dragging"); };
-viewport.addEventListener("pointerup", endDrag);
-viewport.addEventListener("pointercancel", endDrag);
+const endDrag = () => { drag = null; stage.classList.remove("dragging"); };
+stage.addEventListener("pointerup", endDrag);
+stage.addEventListener("pointercancel", endDrag);
+
+scrub.addEventListener("input", () => setCam(Math.pow(Number(scrub.value) / 1000, 3) * maxCam()));
+addEventListener("resize", () => setCam(camLeft));
 
 const keys = new Set();
 addEventListener("keydown", e => {
+  if (e.target.closest("select, input")) return;           // leave menus and the slider alone
   if (["ArrowLeft", "ArrowRight"].includes(e.key)) { keys.add(e.key); e.preventDefault(); }
 });
 addEventListener("keyup", e => keys.delete(e.key));
@@ -244,14 +405,12 @@ function frame(now) {
   let v = 0;
   if (keys.has("ArrowRight")) v += 600 * mult();
   if (keys.has("ArrowLeft"))  v -= 600 * mult();
-  if (photon) v += LIGHT_PX_PER_S;            // exactly the speed of light at this scale (~300 px/s)
-  if (v) viewport.scrollLeft += v * dt;
+  if (photon) v += LIGHT_PX_PER_S;            // exactly the speed of light at this scale (~756 px/s)
+  if (v) setCam(camLeft + v * dt);
+  if (dirty) { dirty = false; render(); }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-
-update();
-viewport.focus();
 </script>
 </body>
 </html>
