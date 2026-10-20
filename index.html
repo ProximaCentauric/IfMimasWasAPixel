@@ -172,6 +172,27 @@ const SATURN_RINGS = [
   { name: "E ring", r0: 180000, r1: 480000, fill: "rgba(190,200,240,.05)" }
 ];
 
+// Uranus's rings: radii in km from the planet's centre (widths are approximate for the narrow rings).
+// Uranus is tipped 97.8 degrees, so its ring plane stands almost upright against the orbit. Like Saturn's,
+// the tilt below is chosen so the bands show (0 would hide them), and the rings are drawn as tall ellipses.
+// Rings narrower than half a pixel are drawn as thin lines, so they are far wider on screen than in reality.
+const URANUS_RING_OPEN_DEG = 30;
+const URANUS_RINGS = [
+  { name: "ζ ring", r0: 37850, r1: 41350, fill: "rgba(150,160,175,.10)" },   // faint dust
+  { name: "6 ring", r0: 41836, r1: 41838, fill: "rgba(185,195,205,.55)" },
+  { name: "5 ring", r0: 42232, r1: 42236, fill: "rgba(185,195,205,.55)" },
+  { name: "4 ring", r0: 42568, r1: 42572, fill: "rgba(185,195,205,.55)" },
+  { name: "α ring", r0: 44714, r1: 44722, fill: "rgba(195,205,215,.65)" },
+  { name: "β ring", r0: 45657, r1: 45665, fill: "rgba(195,205,215,.65)" },
+  { name: "η ring", r0: 47174, r1: 47176, fill: "rgba(185,195,205,.55)" },
+  { name: "γ ring", r0: 47625, r1: 47629, fill: "rgba(185,195,205,.60)" },
+  { name: "δ ring", r0: 48298, r1: 48303, fill: "rgba(185,195,205,.60)" },
+  { name: "λ ring", r0: 50023, r1: 50025, fill: "rgba(185,195,205,.50)" },
+  { name: "ε ring", r0: 51120, r1: 51178, fill: "rgba(220,228,238,.85)" },   // the bright one, about 58 km wide
+  { name: "ν ring", r0: 66100, r1: 69900, fill: "rgba(210,120,100,.10)" },   // faint, reddish dust
+  { name: "μ ring", r0: 86000, r1: 103000, fill: "rgba(110,140,230,.10)" }   // faint, bluish dust
+];
+
 // Asteroids, dwarf planets and other small bodies, sorted by distance
 // au = semi-major axis (AU), est = size is an estimate
 const TNO = "Trans-Neptunian object";
@@ -372,27 +393,51 @@ function add(el, x, halfWidth) {
   items.push({ el, x, hw: halfWidth, vis: false });
 }
 
-/* Saturn's rings: seen at an angle, so each band is an ellipse. The far half is drawn behind the planet, the near half in front. */
-const ringSin = Math.sin(RING_TILT_DEG * Math.PI / 180);
-const ringsOn = ringSin > 0.01;
-const RING_R = px(480000);              // outer edge of the faint E ring, in px
-const RING_HW = RING_R + 100;
-function ringLayer(half) {
-  const H = RING_R * ringSin;
+/* Ring systems: seen at an angle, so each band is an ellipse. The far half is drawn behind the planet, the near half in front.
+   rot turns the whole ring (Uranus's rings stand on end). */
+const RING_SYSTEMS = {
+  Saturn: {
+    rings: SATURN_RINGS, outer: 480000, tilt: RING_TILT_DEG, rot: 0,
+    label: ["Main rings reach 136,775 km from the centre",
+            "Faint E ring reaches about 480,000 km",
+            "Typically about 10 m thick: 1/40,000 of a pixel"]
+  },
+  Uranus: {
+    rings: URANUS_RINGS, outer: 103000, tilt: URANUS_RING_OPEN_DEG, rot: 90,
+    label: ["13 known rings, out to about 103,000 km",
+            "Nine narrow rings, each 1/200 to 1/7 of a pixel wide",
+            "Tipped on its side, so the rings stand on end"]
+  }
+};
+Object.entries(RING_SYSTEMS).forEach(([name, s]) => {
+  s.name = name;
+  s.sin = Math.sin(s.tilt * Math.PI / 180);
+  s.on = s.sin > 0.01;
+  s.R = px(s.outer);                    // outer edge, in px
+  s.hw = s.R + 100;
+});
+
+function ringLayer(s, half) {
+  const R = s.R, H = R * s.sin;
   const ell = (rx, ry) => `M ${-rx} 0 A ${rx} ${ry} 0 1 0 ${rx} 0 A ${rx} ${ry} 0 1 0 ${-rx} 0 Z`;
-  const bands = SATURN_RINGS.map(r => {
+  const bands = s.rings.map(r => {
     const o = px(r.r1), i = px(r.r0);
-    return `<path fill="${r.fill}" fill-rule="evenodd" d="${ell(o, o * ringSin)} ${ell(i, i * ringSin)}"/>`;
+    if (o - i < 0.5) {                  // under half a pixel: draw a hairline instead of a band
+      const m = (o + i) / 2;
+      return `<ellipse rx="${m}" ry="${m * s.sin}" fill="none" stroke="${r.fill}" stroke-width="0.6"/>`;
+    }
+    return `<path fill="${r.fill}" fill-rule="evenodd" d="${ell(o, o * s.sin)} ${ell(i, i * s.sin)}"/>`;
   }).join("");
-  const y = half === "back" ? -H : 0;
+  const y = half === "back" ? -H - 2 : 0;
+  const id = `ring-${s.name}-${half}`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `${-RING_R} ${-H} ${2 * RING_R} ${2 * H}`);
-  svg.setAttribute("width", 2 * RING_R);
+  svg.setAttribute("viewBox", `${-R} ${-H} ${2 * R} ${2 * H}`);
+  svg.setAttribute("width", 2 * R);
   svg.setAttribute("height", 2 * H);
-  svg.style.cssText = "position:absolute; top:50%; transform:translate(-50%,-50%); overflow:visible; pointer-events:none;";
+  svg.style.cssText = "position:absolute; top:50%; transform:translate(-50%,-50%) rotate(" + s.rot + "deg); overflow:visible; pointer-events:none;";
   svg.innerHTML =
-    `<defs><clipPath id="ring-${half}"><rect x="${-RING_R}" y="${y}" width="${2 * RING_R}" height="${H}"/></clipPath></defs>` +
-    `<g clip-path="url(#ring-${half})">${bands}</g>`;
+    `<defs><clipPath id="${id}"><rect x="${-R}" y="${y}" width="${2 * R}" height="${H + 2}"/></clipPath></defs>` +
+    `<g clip-path="url(#${id})">${bands}</g>`;
   return svg;
 }
 
@@ -421,7 +466,8 @@ BODIES.forEach(b => {
     add(h, x, 60);
   }
 
-  if (b.name === "Saturn" && ringsOn) add(ringLayer("back"), x, RING_HW);
+  const rs = RING_SYSTEMS[b.name];
+  if (rs && rs.on) add(ringLayer(rs, "back"), x, rs.hw);
 
   if (!b.ghost) {
     const el = document.createElement("div");
@@ -431,7 +477,7 @@ BODIES.forEach(b => {
     add(el, x, size / 2 + 150);
   }
 
-  if (b.name === "Saturn" && ringsOn) add(ringLayer("front"), x, RING_HW);
+  if (rs && rs.on) add(ringLayer(rs, "front"), x, rs.hw);
 
   /* Label: big bodies (the Sun, nearby stars) get it centred inside */
   const inside = size > 500;
@@ -465,15 +511,13 @@ BODIES.forEach(b => {
   tag.innerHTML = below ? stem + text : text + stem;
   add(tag, x, 220);
 
-  /* Label for Saturn's rings, below the planet */
-  if (b.name === "Saturn" && ringsOn) {
+  /* Label for the rings, below the planet */
+  if (rs && rs.on) {
     const rt = document.createElement("div");
     rt.className = "tag below";
     rt.style.top = `calc(50% + ${size / 2 + 14}px)`;
-    rt.innerHTML = `<i class="stem"></i><b>Saturn's rings</b>` +
-      `<span>Main rings reach 136,775 km from the centre</span>` +
-      `<span><br>Faint E ring reaches about 480,000 km</span>` +
-      `<span><br>Typically about 10 m thick: 1/40,000 of a pixel</span>`;
+    rt.innerHTML = `<i class="stem"></i><b>${b.name}'s rings</b>` +
+      rs.label.map((t, n) => `<span>${n ? "<br>" : ""}${t}</span>`).join("");
     add(rt, x, 260);
   }
 
