@@ -94,6 +94,9 @@
   #hint, #legend { color: var(--dim); font-size: .85rem; }
   #scrub { flex: 1 1 160px; min-width: 120px; accent-color: #ffb347; }
   #controls { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+  /* Magnetospheres: one screen-sized overlay, redrawn as the camera moves */
+  #magneto { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+  body.mag-off #magneto, body.mag-off .maglabel { display: none !important; }
   #center-mark {
     position: fixed; left: 50%; top: 0; bottom: 0; width: 1px; z-index: 1;
     background: linear-gradient(transparent 40%, rgba(255,179,71,.35) 50%, transparent 60%);
@@ -117,7 +120,7 @@
     <option value="all">Slider: all the way to Alpha Centauri</option>
   </select>
   <div id="controls">
-    <span id="legend">Dashed ring: under one pixel. Dotted purple ring: never found.</span>
+    <span id="legend">Dashed ring: under 1 pixel. Dotted purple: never found. Teal: magnetopause. Blue dashes: bow shock.</span>
     <label for="speed" id="hint">Scroll speed</label>
     <select id="speed">
       <option value="1">x1</option>
@@ -130,6 +133,7 @@
       <option value="10000000">x10,000,000</option>
       <option value="100000000">x100,000,000</option>
     </select>
+    <button id="magneto-toggle" aria-pressed="true" title="Show or hide the magnetospheres">Magnetospheres</button>
     <button id="photon" aria-pressed="false">Ride a beam of light</button>
   </div>
 </div>
@@ -192,6 +196,50 @@ const URANUS_RINGS = [
   { name: "ν ring", r0: 66100, r1: 69900, fill: "rgba(210,120,100,.10)" },   // faint, reddish dust
   { name: "μ ring", r0: 86000, r1: 103000, fill: "rgba(110,140,230,.10)" }   // faint, bluish dust
 ];
+
+// Neptune's Adams ring (62,933 km, about 15 km wide) and the five bright arcs embedded in it.
+// Arc angles are in degrees round the ring, measured from the line of nodes: start and end of each arc.
+// Lengths and gaps follow published separations (Fraternité about 10 degrees long, the others 1 to 4 degrees,
+// all five within about 40 degrees). Where the real arcs sit round the ring is arbitrary here, and the real
+// ones have drifted and faded since Voyager 2 (Courage and Liberté were gone by 2009), so treat them as approximate.
+const NEPTUNE_RING_OPEN_DEG = 28.3;
+const NEPTUNE_RINGS = [
+  { name: "Adams ring",   r0: 62925, r1: 62940, fill: "rgba(170,190,235,.25)" },
+  { name: "Fraternité",   r0: 62925, r1: 62940, fill: "rgba(205,220,255,.95)", arc: [20, 30],       w: 1.4 },
+  { name: "Égalité 1",    r0: 62925, r1: 62940, fill: "rgba(205,220,255,.85)", arc: [31.75, 34.25], w: 1.4 },
+  { name: "Égalité 2",    r0: 62925, r1: 62940, fill: "rgba(205,220,255,.85)", arc: [34.2, 37.2],   w: 1.4 },
+  { name: "Liberté",      r0: 62925, r1: 62940, fill: "rgba(205,220,255,.85)", arc: [43, 47],       w: 1.4 },
+  { name: "Courage",      r0: 62925, r1: 62940, fill: "rgba(205,220,255,.70)", arc: [50.95, 53.65], w: 1.4 }
+];
+
+// Rings that are thick compared with their width, drawn edge-on as slabs (radii and thickness in km).
+// Jupiter's axis is tipped only 3 degrees, and the Phoebe ring lies near the plane of the planets' orbits,
+// so both really are seen close to edge-on from the side. profile "edges": brighter at top and bottom
+// (the gossamer rings are brightest at their edges), "mid": brightest in the middle.
+const EDGE_ON_RINGS = {
+  Saturn: {
+    rgb: "205,175,145",
+    slabs: [
+      { r0: 6000000, r1: 18000000, thick: 2400000, a: .05, profile: "mid" },
+      { r0: 8500000, r1: 14000000, thick: 1500000, a: .05, profile: "mid" }
+    ],
+    title: "Phoebe ring", labelKm: 9000000,
+    label: ["Bulk of it runs from about 6 to 18 million km out",
+            "About 2.4 million km thick: 6,000 pixels",
+            "Drawn edge-on, tilted 27° from the main rings"]
+  },
+  Jupiter: {
+    rgb: "205,160,120",
+    slabs: [
+      { r0: 129000, r1: 226000, thick: 8400, a: .07, profile: "edges" },   // Thebe gossamer ring
+      { r0: 129000, r1: 182000, thick: 2300, a: .16, profile: "edges" }    // Amalthea gossamer ring
+    ],
+    title: "Jupiter's gossamer rings", labelKm: 0,
+    label: ["Amalthea ring: 129,000 to 182,000 km, 2,300 km thick",
+            "Thebe ring: 129,000 to 226,000 km, 8,400 km thick",
+            "Drawn edge-on: Jupiter's tilt is only 3°"]
+  }
+};
 
 // Asteroids, dwarf planets and other small bodies, sorted by distance
 // au = semi-major axis (AU), est = size is an estimate
@@ -385,6 +433,105 @@ const regions = REGION_DEFS.map(r => {
   return { ...r, x0: xAU(r.from), x1: xAU(r.to), el };
 });
 
+/* ---------- Magnetospheres ----------
+   Sizes are in planet radii, measured sunward along the Sun-planet line (the "nose"):
+   mp = magnetopause (where the planet's field holds off the solar wind), bs = bow shock,
+   range = how far the magnetopause swings with solar-wind pressure. The shape is one generic Shue-type curve,
+   r = r0 / sin(d/2)^1.2, scaled to each planet, so the flanks and tail are schematic: the real ones are lumpier,
+   and Uranus's and Neptune's tilted fields twist their tails. tailKm is how far the shape is drawn
+   before it fades out. The Sun is to the left, so the nose points left and the tail trails off to the right. */
+const MAGNETOSPHERES = {
+  Earth:   { rKm: 6378,  mp: 10,   bs: 14,   range: [6, 15],   tailKm: 200 * 6378,
+             tail: "Tail runs at least 200 radii, well past the Moon" },
+  Jupiter: { rKm: 71492, mp: 75,   bs: 100,  range: [50, 100], tailKm: 6 * AU_KM,
+             tail: "Tail stretches over 6 AU, past Saturn's orbit" },
+  Saturn:  { rKm: 60268, mp: 19,   bs: 26,   range: [16, 22],  tailKm: 87 * 60268,
+             tail: "Voyager 2 last crossed the shock 87 radii downstream" },
+  Uranus:  { rKm: 25559, mp: 18,   bs: 23.7,                    tailKm: 227.7 * 25559,
+             tail: "Voyager 2 last crossed the shock 228 radii downstream",
+             extra: "Field tipped 60° off the spin axis: the real tail twists round every 17 hours" },
+  Neptune: { rKm: 24764, mp: 24.5, bs: 34.9, range: [23, 26],  tailKm: 161.1 * 24764,
+             tail: "Voyager 2 last crossed the shock 161 radii downstream",
+             extra: "Field tipped 47° off the spin axis, so the shock moves as it spins" }
+};
+const fmtKm = km => km >= 1e6 ? `${(km / 1e6).toFixed(1)} million km` : `${fmt(km)} km`;
+
+/* Boundary curve for a given nose distance: points (X, Y) in px, X running from the nose (negative = sunward) down the tail */
+function shueCurve(noseKm, tailKm) {
+  const X = [], Y = [];
+  for (let d = Math.PI; d > 1e-7; d *= 0.985) {
+    const r = noseKm / Math.pow(Math.sin(d / 2), 1.2);
+    X.push(px(r * Math.cos(d))); Y.push(px(r * Math.sin(d)));
+    if (r * Math.cos(d) >= tailKm) break;
+  }
+  return { X, Y };
+}
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const magSvg = document.createElementNS(SVGNS, "svg");
+magSvg.id = "magneto";
+stage.appendChild(magSvg);                // after the regions, before everything else, so it sits behind the bodies
+let magnetoOn = true;
+const MAG = Object.entries(MAGNETOSPHERES).map(([name, m]) => {
+  const b = BODIES.find(q => q.name === name);
+  const o = { ...m, name, x: xOf(b), mpKm: m.mp * m.rKm, bsKm: m.bs * m.rKm };
+  o.L = px(m.tailKm);
+  o.mpC = shueCurve(o.mpKm, m.tailKm);
+  o.bsC = shueCurve(o.bsKm, m.tailKm);
+  magSvg.insertAdjacentHTML("beforeend",
+    `<g id="mg-${name}" style="display:none">` +
+      `<defs><linearGradient id="mgrad-${name}" gradientUnits="userSpaceOnUse" y1="0" y2="0">` +
+        `<stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient>` +
+      `<mask id="mmask-${name}" maskUnits="userSpaceOnUse" x="0" y="0"><rect x="0" y="0" fill="url(#mgrad-${name})"/></mask></defs>` +
+      `<g mask="url(#mmask-${name})">` +
+        `<path class="bs" fill="rgba(111,182,255,.05)" stroke="rgba(111,182,255,.6)" stroke-width="1.2" stroke-dasharray="8 6"/>` +
+        `<path class="mp" fill="rgba(95,212,196,.07)" stroke="rgba(95,212,196,.8)" stroke-width="1.5"/>` +
+      `</g></g>`);
+  o.g = magSvg.querySelector(`#mg-${name}`);
+  o.grad = magSvg.querySelector(`#mgrad-${name}`);
+  o.mask = magSvg.querySelector(`#mmask-${name}`);
+  o.maskRect = o.mask.firstElementChild;
+  o.bsPath = o.g.querySelector(".bs");
+  o.mpPath = o.g.querySelector(".mp");
+  return o;
+});
+
+/* Only the slice of each curve that is on screen is drawn, so a 6 AU tail costs no more than a small one */
+function slicePath(c, cx, cy, vw, vh) {
+  const n = c.X.length;
+  let i0 = 0, i1 = n - 1;
+  for (let i = 0; i < n; i++) { if (cx + c.X[i] <= 0) i0 = i; else break; }
+  for (let i = n - 1; i >= 0; i--) { if (cx + c.X[i] >= vw) i1 = i; else break; }
+  let up = "", lo = "";
+  for (let i = i0; i <= i1; i++) {
+    const sx = (cx + c.X[i]).toFixed(1), y = Math.min(c.Y[i], vh);
+    up += `${i === i0 ? "M" : "L"}${sx} ${(cy - y).toFixed(1)}`;
+    lo = `L${sx} ${(cy + y).toFixed(1)}` + lo;
+  }
+  return up + lo + "Z";
+}
+function drawMagnetospheres(vw, vh) {
+  if (!magnetoOn) return;
+  const cy = vh / 2;
+  for (const m of MAG) {
+    const cx = m.x - camLeft;
+    if (cx + m.L < -50 || cx + m.bsC.X[0] > vw + 50) { m.g.style.display = "none"; continue; }
+    m.g.style.display = "";
+    m.bsPath.setAttribute("d", slicePath(m.bsC, cx, cy, vw, vh));
+    m.mpPath.setAttribute("d", slicePath(m.mpC, cx, cy, vw, vh));
+    m.grad.setAttribute("x1", cx + m.L * 0.4);
+    m.grad.setAttribute("x2", cx + m.L);
+    m.mask.setAttribute("width", vw); m.mask.setAttribute("height", vh);
+    m.maskRect.setAttribute("width", vw); m.maskRect.setAttribute("height", vh);
+  }
+}
+document.getElementById("magneto-toggle").addEventListener("click", e => {
+  magnetoOn = !magnetoOn;
+  e.currentTarget.setAttribute("aria-pressed", String(magnetoOn));
+  document.body.classList.toggle("mag-off", !magnetoOn);
+  dirty = true;
+});
+
 /* Everything else registers here; only items near the screen are shown */
 const items = [];
 function add(el, x, halfWidth) {
@@ -402,6 +549,13 @@ const RING_SYSTEMS = {
             "Faint E ring reaches about 480,000 km",
             "Typically about 10 m thick: 1/40,000 of a pixel"]
   },
+  Neptune: {
+    rings: NEPTUNE_RINGS, outer: 63000, tilt: NEPTUNE_RING_OPEN_DEG, rot: 0,
+    title: "Neptune's ring arcs",
+    label: ["Five bright arcs in the Adams ring, 62,933 km out",
+            "Each arc is 1° to 10° long and about 15 km wide",
+            "All five sit within about 40° of the ring"]
+  },
   Uranus: {
     rings: URANUS_RINGS, outer: 103000, tilt: URANUS_RING_OPEN_DEG, rot: 90,
     label: ["13 known rings, out to about 103,000 km",
@@ -417,11 +571,54 @@ Object.entries(RING_SYSTEMS).forEach(([name, s]) => {
   s.hw = s.R + 100;
 });
 
+Object.entries(EDGE_ON_RINGS).forEach(([name, e]) => {
+  e.name = name;
+  e.R = px(Math.max(...e.slabs.map(t => t.r1)));
+  e.H = px(Math.max(...e.slabs.map(t => t.thick)));
+  e.hw = e.R + 100;
+});
+
+function edgeOnLayer(e) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `${-e.R} ${-e.H / 2} ${2 * e.R} ${e.H}`);
+  svg.setAttribute("width", 2 * e.R);
+  svg.setAttribute("height", e.H);
+  svg.style.cssText = "position:absolute; top:50%; transform:translate(-50%,-50%); overflow:visible; pointer-events:none;";
+  let defs = "", rects = "";
+  e.slabs.forEach((t, n) => {
+    const id = `edge-${e.name}-${n}`;
+    const lo = t.profile === "edges" ? t.a : 0, hi = t.profile === "edges" ? t.a * 0.3 : t.a;
+    defs += `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">` +
+      `<stop offset="0" stop-color="rgb(${e.rgb})" stop-opacity="${lo}"/>` +
+      `<stop offset=".5" stop-color="rgb(${e.rgb})" stop-opacity="${hi}"/>` +
+      `<stop offset="1" stop-color="rgb(${e.rgb})" stop-opacity="${lo}"/></linearGradient>`;
+    const a = px(t.r0), b = px(t.r1), h = px(t.thick);
+    [-b, a].forEach(x0 => { rects += `<rect x="${x0}" y="${-h / 2}" width="${b - a}" height="${h}" fill="url(#${id})"/>`; });
+  });
+  svg.innerHTML = `<defs>${defs}</defs>${rects}`;
+  return svg;
+}
+
+function ringTag(title, lines, top) {
+  const rt = document.createElement("div");
+  rt.className = "tag below";
+  rt.style.top = top;
+  rt.innerHTML = `<i class="stem"></i><b>${title}</b>` +
+    lines.map((t, n) => `<span>${n ? "<br>" : ""}${t}</span>`).join("");
+  return rt;
+}
+
 function ringLayer(s, half) {
   const R = s.R, H = R * s.sin;
   const ell = (rx, ry) => `M ${-rx} 0 A ${rx} ${ry} 0 1 0 ${rx} 0 A ${rx} ${ry} 0 1 0 ${-rx} 0 Z`;
   const bands = s.rings.map(r => {
     const o = px(r.r1), i = px(r.r0);
+    if (r.arc) {                        // a partial ring: draw just the arc, as a line
+      const m = (o + i) / 2, ry = m * s.sin;
+      const pt = d => { const t = d * Math.PI / 180; return `${m * Math.cos(t)} ${ry * Math.sin(t)}`; };
+      return `<path d="M ${pt(r.arc[0])} A ${m} ${ry} 0 0 1 ${pt(r.arc[1])}" fill="none" stroke="${r.fill}" stroke-width="${r.w || 1.2}" stroke-linecap="round"/>`;
+    }
     if (o - i < 0.5) {                  // under half a pixel: draw a hairline instead of a band
       const m = (o + i) / 2;
       return `<ellipse rx="${m}" ry="${m * s.sin}" fill="none" stroke="${r.fill}" stroke-width="0.6"/>`;
@@ -467,6 +664,8 @@ BODIES.forEach(b => {
   }
 
   const rs = RING_SYSTEMS[b.name];
+  const eo = EDGE_ON_RINGS[b.name];
+  if (eo) add(edgeOnLayer(eo), x, eo.hw);
   if (rs && rs.on) add(ringLayer(rs, "back"), x, rs.hw);
 
   if (!b.ghost) {
@@ -511,14 +710,26 @@ BODIES.forEach(b => {
   tag.innerHTML = below ? stem + text : text + stem;
   add(tag, x, 220);
 
-  /* Label for the rings, below the planet */
-  if (rs && rs.on) {
-    const rt = document.createElement("div");
-    rt.className = "tag below";
-    rt.style.top = `calc(50% + ${size / 2 + 14}px)`;
-    rt.innerHTML = `<i class="stem"></i><b>${b.name}'s rings</b>` +
-      rs.label.map((t, n) => `<span>${n ? "<br>" : ""}${t}</span>`).join("");
-    add(rt, x, 260);
+  /* Labels for the rings: below the planet, or (for the huge Phoebe ring) out on the ring itself */
+  if (rs && rs.on) add(ringTag(rs.title || `${b.name}'s rings`, rs.label, `calc(50% + ${size / 2 + 14}px)`), x, 260);
+  if (eo) {
+    const top = eo.labelKm ? "calc(50% + 14px)" : `calc(50% + ${size / 2 + 14}px)`;
+    (eo.labelKm ? [-1, 1] : [0]).forEach(sg => add(ringTag(eo.title, eo.label, top), x + sg * px(eo.labelKm), 260));
+  }
+
+  /* Magnetosphere label, out at the sun-facing edge (the magnetopause nose) */
+  const mg = MAG.find(m => m.name === b.name);
+  if (mg) {
+    const lines = [
+      `Sun-facing edge: about ${mg.mp} radii out (${fmtKm(mg.mpKm)}, ${fmt(px(mg.mpKm))} pixels)`,
+      `Bow shock: about ${mg.bs} radii out (${fmtKm(mg.bsKm)})`
+    ];
+    if (mg.range) lines.push(`Pushed in and out by the solar wind: ${mg.range[0]} to ${mg.range[1]} radii`);
+    lines.push(mg.tail);
+    if (mg.extra) lines.push(mg.extra);
+    const t = ringTag(`${b.name}'s magnetosphere`, lines, "calc(50% + 14px)");
+    t.classList.add("maglabel");
+    add(t, x - px(mg.mpKm), 300);
   }
 
   /* Jump controls: planets get buttons, everything else gets a dropdown */
@@ -559,10 +770,18 @@ farOptions.sort((p, q) => p.x - q.x).forEach(o => {
   farMenu.appendChild(opt);
 });
 
+const magMenu = makeMenu("Jump to a magnetosphere");
+MAG.forEach(m => {
+  const opt = document.createElement("option");
+  opt.value = m.x - px(m.mpKm); opt.textContent = `${m.name}'s magnetopause`;
+  magMenu.appendChild(opt);
+});
+
 nav.appendChild(smallMenu);
 nav.appendChild(moonMenu);
 nav.appendChild(hypoMenu);
 nav.appendChild(farMenu);
+nav.appendChild(magMenu);
 
 /* Ruler: every AU to 30, every 10 AU to 100, then wider steps, plus light-travel marks */
 const TICKS = [];
@@ -615,6 +834,7 @@ function render() {
     if (vis !== it.vis) { it.el.style.display = vis ? "" : "none"; it.vis = vis; }
     if (vis) it.el.style.left = sx + "px";
   }
+  drawMagnetospheres(vw, stage.clientHeight);
   for (const r of regions) {                      // clip each band to the screen (they can be billions of px wide)
     const s = Math.max(r.x0, camLeft), e = Math.min(r.x1, camLeft + vw);
     if (e > s) {
