@@ -96,6 +96,7 @@
   #controls { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
   /* Magnetospheres: one screen-sized overlay, redrawn as the camera moves */
   #magneto { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+  .tailend { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(95, 212, 196, .55); pointer-events: none; }
   body.mag-off #magneto, body.mag-off .maglabel { display: none !important; }
   #center-mark {
     position: fixed; left: 50%; top: 0; bottom: 0; width: 1px; z-index: 1;
@@ -437,30 +438,40 @@ const regions = REGION_DEFS.map(r => {
    Sizes are in planet radii, measured sunward along the Sun-planet line (the "nose"):
    mp = magnetopause (where the planet's field holds off the solar wind), bs = bow shock,
    range = how far the magnetopause swings with solar-wind pressure. The shape is one generic Shue-type curve,
-   r = r0 / sin(d/2)^1.2, scaled to each planet, so the flanks and tail are schematic: the real ones are lumpier,
+   r = r0 / sin(d/2)^(2 alpha) with alpha 0.6 (0.5 for Mercury, as MESSENGER measured), scaled to each planet, so the flanks and tail are schematic: the real ones are lumpier,
    and Uranus's and Neptune's tilted fields twist their tails. tailKm is how far the shape is drawn
    before it fades out. The Sun is to the left, so the nose points left and the tail trails off to the right. */
 const MAGNETOSPHERES = {
+  Mercury: { rKm: 2439.7, mp: 1.45, bs: 1.96, range: [1.35, 1.55], alpha: 0.5, tailKm: 100 * 2439.7,
+             tail: "Tail length is poorly known: 10 to 100 radii",
+             endTitle: "Where Mercury's magnetotail is drawn to",
+             end: "Its real end is uncertain: somewhere between 10 and 100 radii",
+             extra: "In big solar storms it is pressed right down to the surface" },
   Earth:   { rKm: 6378,  mp: 10,   bs: 14,   range: [6, 15],   tailKm: 200 * 6378,
-             tail: "Tail runs at least 200 radii, well past the Moon" },
+             tail: "Tail runs at least 200 radii, well past the Moon",
+             end: "The tail has been traced at least this far" },
   Jupiter: { rKm: 71492, mp: 75,   bs: 100,  range: [50, 100], tailKm: 6 * AU_KM,
-             tail: "Tail stretches over 6 AU, past Saturn's orbit" },
+             tail: "Tail stretches over 6 AU, past Saturn's orbit",
+             end: "At least 6 AU long: well past Saturn's orbit" },
   Saturn:  { rKm: 60268, mp: 19,   bs: 26,   range: [16, 22],  tailKm: 87 * 60268,
-             tail: "Voyager 2 last crossed the shock 87 radii downstream" },
+             tail: "Voyager 2 last crossed the shock 87 radii downstream",
+             end: "Voyager 2 last crossed the shock about here; the tail may run farther" },
   Uranus:  { rKm: 25559, mp: 18,   bs: 23.7,                    tailKm: 227.7 * 25559,
              tail: "Voyager 2 last crossed the shock 228 radii downstream",
+             end: "Voyager 2 last crossed the shock about here; the tail may run farther",
              extra: "Field tipped 60° off the spin axis: the real tail twists round every 17 hours" },
   Neptune: { rKm: 24764, mp: 24.5, bs: 34.9, range: [23, 26],  tailKm: 161.1 * 24764,
              tail: "Voyager 2 last crossed the shock 161 radii downstream",
+             end: "Voyager 2 last crossed the shock about here; the tail may run farther",
              extra: "Field tipped 47° off the spin axis, so the shock moves as it spins" }
 };
 const fmtKm = km => km >= 1e6 ? `${(km / 1e6).toFixed(1)} million km` : `${fmt(km)} km`;
 
 /* Boundary curve for a given nose distance: points (X, Y) in px, X running from the nose (negative = sunward) down the tail */
-function shueCurve(noseKm, tailKm) {
+function shueCurve(noseKm, tailKm, alpha = 0.6) {
   const X = [], Y = [];
   for (let d = Math.PI; d > 1e-7; d *= 0.985) {
-    const r = noseKm / Math.pow(Math.sin(d / 2), 1.2);
+    const r = noseKm / Math.pow(Math.sin(d / 2), 2 * alpha);
     X.push(px(r * Math.cos(d))); Y.push(px(r * Math.sin(d)));
     if (r * Math.cos(d) >= tailKm) break;
   }
@@ -476,8 +487,8 @@ const MAG = Object.entries(MAGNETOSPHERES).map(([name, m]) => {
   const b = BODIES.find(q => q.name === name);
   const o = { ...m, name, x: xOf(b), mpKm: m.mp * m.rKm, bsKm: m.bs * m.rKm };
   o.L = px(m.tailKm);
-  o.mpC = shueCurve(o.mpKm, m.tailKm);
-  o.bsC = shueCurve(o.bsKm, m.tailKm);
+  o.mpC = shueCurve(o.mpKm, m.tailKm, m.alpha);
+  o.bsC = shueCurve(o.bsKm, m.tailKm, m.alpha);
   magSvg.insertAdjacentHTML("beforeend",
     `<g id="mg-${name}" style="display:none">` +
       `<defs><linearGradient id="mgrad-${name}" gradientUnits="userSpaceOnUse" y1="0" y2="0">` +
@@ -730,6 +741,16 @@ BODIES.forEach(b => {
     const t = ringTag(`${b.name}'s magnetosphere`, lines, "calc(50% + 14px)");
     t.classList.add("maglabel");
     add(t, x - px(mg.mpKm), 300);
+
+    /* Mark where the drawn magnetotail ends: a dashed line the full height of the screen, plus a label */
+    const endLine = document.createElement("div");
+    endLine.className = "tailend maglabel";
+    add(endLine, x + mg.L, 5);
+    const endTag = ringTag(mg.endTitle || "Edge of the known magnetotail",
+      [`${b.name}'s tail, ${fmtKm(mg.tailKm)} from the planet (${fmt(mg.L)} pixels)`, mg.end],
+      "calc(50% + 14px)");
+    endTag.classList.add("maglabel");
+    add(endTag, x + mg.L, 300);
   }
 
   /* Jump controls: planets get buttons, everything else gets a dropdown */
@@ -771,10 +792,16 @@ farOptions.sort((p, q) => p.x - q.x).forEach(o => {
 });
 
 const magMenu = makeMenu("Jump to a magnetosphere");
-MAG.forEach(m => {
-  const opt = document.createElement("option");
-  opt.value = m.x - px(m.mpKm); opt.textContent = `${m.name}'s magnetopause`;
-  magMenu.appendChild(opt);
+[["Sun-facing edge", m => m.x - px(m.mpKm), "magnetopause"],
+ ["Tail end",        m => m.x + m.L,         "magnetotail end"]].forEach(([group, at, word]) => {
+  const g = document.createElement("optgroup");
+  g.label = group;
+  MAG.forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = at(m); opt.textContent = `${m.name}'s ${word}`;
+    g.appendChild(opt);
+  });
+  magMenu.appendChild(g);
 });
 
 nav.appendChild(smallMenu);
